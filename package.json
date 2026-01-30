@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "refund-indexer": "bun run src/scripts/refund-indexer.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
