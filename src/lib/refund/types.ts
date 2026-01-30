@@ -1,13 +1,11 @@
-// Event types (parsed from logs)
+// Event types — only fields needed for ordering + reimbursement math
 export interface AccrueInterestEvent {
   type: "accrue";
   blockNumber: bigint;
   transactionIndex: number;
   logIndex: number;
   timestamp: number;
-  prevBorrowRate: bigint; // per-second rate in WAD
-  interest: bigint; // total interest accrued (in assets)
-  feeShares: bigint;
+  prevBorrowRate: bigint;
 }
 
 export interface BorrowEvent {
@@ -16,9 +14,8 @@ export interface BorrowEvent {
   transactionIndex: number;
   logIndex: number;
   timestamp: number;
-  borrower: string; // onBehalf address
+  borrower: string;
   assets: bigint;
-  shares: bigint;
 }
 
 export interface RepayEvent {
@@ -27,9 +24,8 @@ export interface RepayEvent {
   transactionIndex: number;
   logIndex: number;
   timestamp: number;
-  borrower: string; // onBehalf address
+  borrower: string;
   assets: bigint;
-  shares: bigint;
 }
 
 export interface LiquidateEvent {
@@ -40,7 +36,6 @@ export interface LiquidateEvent {
   timestamp: number;
   borrower: string;
   repaidAssets: bigint;
-  repaidShares: bigint;
 }
 
 export type TimelineEvent =
@@ -49,10 +44,10 @@ export type TimelineEvent =
   | RepayEvent
   | LiquidateEvent;
 
-// Output types
+// Output
 export interface BorrowerRefund {
   address: string;
-  overpayment: string; // formatted USDC amount
+  overpayment: string;
 }
 
 export interface RefundReport {

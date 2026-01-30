@@ -1,5 +1,5 @@
 import { formatUnits } from "viem";
-import { MORPHO_BLUE, MARKET_ID, USDC_DECIMALS } from "./config.ts";
+import { MORPHO_BLUE, MARKET_ID, USDC_DECIMALS, APR_CAP_PERCENT } from "./config.ts";
 import type { RefundReport, BorrowerRefund } from "./types.ts";
 
 /**
@@ -35,7 +35,7 @@ export function generateReport(
     marketId: MARKET_ID,
     chain: "polygon",
     morphoBlue: MORPHO_BLUE,
-    thresholdAprPercent: "5.0",
+    thresholdAprPercent: `${APR_CAP_PERCENT}.0`,
     periodStartBlock: Number(startBlock),
     periodEndBlock: Number(endBlock),
     periodStartTimestamp: startTimestamp,

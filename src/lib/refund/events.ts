@@ -29,128 +29,101 @@ export interface FetchedEvents {
   liquidate: LiquidateEvent[];
 }
 
+// Polygon average block time in seconds
+const BLOCK_TIME_SECONDS = 2;
+
 /**
- * Fetch block timestamps for a list of block numbers
+ * Estimate timestamp for a block based on current time and block number
  */
-async function getBlockTimestamps(
-  client: PublicClient,
-  blockNumbers: bigint[]
-): Promise<Map<bigint, number>> {
-  const unique = [...new Set(blockNumbers.map(String))].map(BigInt);
-  const timestamps = new Map<bigint, number>();
-
-  // Batch fetch blocks (be mindful of RPC limits)
-  const BATCH_SIZE = 100;
-  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    const batch = unique.slice(i, i + BATCH_SIZE);
-    const blocks = await Promise.all(
-      batch.map((bn) => client.getBlock({ blockNumber: bn }))
-    );
-    blocks.forEach((block, idx) => {
-      timestamps.set(batch[idx]!, Number(block.timestamp));
-    });
-  }
-
-  return timestamps;
+function estimateTimestamp(
+  blockNumber: bigint,
+  endBlock: bigint,
+  endTimestamp: number
+): number {
+  const blocksDiff = Number(endBlock - blockNumber);
+  return endTimestamp - blocksDiff * BLOCK_TIME_SECONDS;
 }
 
 /**
  * Fetch all relevant events for the market within a block range
+ * Timestamps are estimated based on block numbers (no eth_getBlockByNumber calls)
  */
 export async function fetchAllEvents(
   client: PublicClient,
   startBlock: bigint,
-  endBlock: bigint
+  endBlock: bigint,
+  endTimestamp: number
 ): Promise<FetchedEvents> {
-  // Fetch all 4 event types in parallel
-  const [accrueRaw, borrowRaw, repayRaw, liquidateRaw] = await Promise.all([
-    client.getLogs({
-      address: MORPHO_BLUE,
-      event: ACCRUE_INTEREST_EVENT,
-      args: { id: MARKET_ID },
-      fromBlock: startBlock,
-      toBlock: endBlock,
-    }),
-    client.getLogs({
-      address: MORPHO_BLUE,
-      event: BORROW_EVENT,
-      args: { id: MARKET_ID },
-      fromBlock: startBlock,
-      toBlock: endBlock,
-    }),
-    client.getLogs({
-      address: MORPHO_BLUE,
-      event: REPAY_EVENT,
-      args: { id: MARKET_ID },
-      fromBlock: startBlock,
-      toBlock: endBlock,
-    }),
-    client.getLogs({
-      address: MORPHO_BLUE,
-      event: LIQUIDATE_EVENT,
-      args: { id: MARKET_ID },
-      fromBlock: startBlock,
-      toBlock: endBlock,
-    }),
-  ]);
+  // Fetch event types sequentially to avoid rate limits
+  const accrueRaw = await client.getLogs({
+    address: MORPHO_BLUE,
+    event: ACCRUE_INTEREST_EVENT,
+    args: { id: MARKET_ID },
+    fromBlock: startBlock,
+    toBlock: endBlock,
+  });
 
-  // Collect all unique block numbers for timestamp fetching
-  const allBlockNumbers = [
-    ...accrueRaw.map((l) => l.blockNumber),
-    ...borrowRaw.map((l) => l.blockNumber),
-    ...repayRaw.map((l) => l.blockNumber),
-    ...liquidateRaw.map((l) => l.blockNumber),
-  ];
+  const borrowRaw = await client.getLogs({
+    address: MORPHO_BLUE,
+    event: BORROW_EVENT,
+    args: { id: MARKET_ID },
+    fromBlock: startBlock,
+    toBlock: endBlock,
+  });
 
-  // Fetch timestamps
-  const timestamps = await getBlockTimestamps(client, allBlockNumbers);
+  const repayRaw = await client.getLogs({
+    address: MORPHO_BLUE,
+    event: REPAY_EVENT,
+    args: { id: MARKET_ID },
+    fromBlock: startBlock,
+    toBlock: endBlock,
+  });
 
-  // Parse AccrueInterest events
+  const liquidateRaw = await client.getLogs({
+    address: MORPHO_BLUE,
+    event: LIQUIDATE_EVENT,
+    args: { id: MARKET_ID },
+    fromBlock: startBlock,
+    toBlock: endBlock,
+  });
+
   const accrue: AccrueInterestEvent[] = accrueRaw.map((log) => ({
     type: "accrue" as const,
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: timestamps.get(log.blockNumber) ?? 0,
+    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
     prevBorrowRate: log.args.prevBorrowRate!,
-    interest: log.args.interest!,
-    feeShares: log.args.feeShares!,
   }));
 
-  // Parse Borrow events
   const borrow: BorrowEvent[] = borrowRaw.map((log) => ({
     type: "borrow" as const,
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: timestamps.get(log.blockNumber) ?? 0,
+    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
-    shares: log.args.shares!,
   }));
 
-  // Parse Repay events
   const repay: RepayEvent[] = repayRaw.map((log) => ({
     type: "repay" as const,
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: timestamps.get(log.blockNumber) ?? 0,
+    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
-    shares: log.args.shares!,
   }));
 
-  // Parse Liquidate events
   const liquidate: LiquidateEvent[] = liquidateRaw.map((log) => ({
     type: "liquidate" as const,
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: timestamps.get(log.blockNumber) ?? 0,
+    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
     borrower: log.args.borrower!,
     repaidAssets: log.args.repaidAssets!,
-    repaidShares: log.args.repaidShares!,
   }));
 
   return { accrue, borrow, repay, liquidate };
