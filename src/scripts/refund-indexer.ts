@@ -69,7 +69,8 @@ async function main() {
       fetchFromBlock,
       currentBlock,
       fetchStartTimestamp,
-      endTimestamp
+      endTimestamp,
+      { rpcUrl: rpc }
     );
     console.log(`  AccrueInterest: ${events.accrue.length}`);
     console.log(`  Borrow: ${events.borrow.length}`);

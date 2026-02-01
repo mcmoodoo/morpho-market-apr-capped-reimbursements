@@ -39,8 +39,56 @@ const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 // Delay between eth_getLogs calls to avoid Infura 429 Too Many Requests (rate limit).
 const RPC_DELAY_MS = 400;
 
+// Max batch size for eth_getBlockByNumber batch (Infura may limit request size).
+const BLOCK_TIMESTAMPS_BATCH_SIZE = 500;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Batch-fetch block timestamps for a set of block numbers (one HTTP request per chunk).
+ * Returns blockNumber -> timestamp (seconds, number).
+ */
+export async function getBlockTimestamps(
+  rpcUrl: string,
+  blockNumbers: bigint[],
+  chunkSize: number = BLOCK_TIMESTAMPS_BATCH_SIZE
+): Promise<Map<bigint, number>> {
+  const map = new Map<bigint, number>();
+  const unique = [...new Set(blockNumbers)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const idToBlock = new Map<number, bigint>();
+    const batch = chunk.map((blockNumber, idx) => {
+      const id = i + idx;
+      idToBlock.set(id, blockNumber);
+      return {
+        jsonrpc: "2.0" as const,
+        id,
+        method: "eth_getBlockByNumber" as const,
+        params: ["0x" + blockNumber.toString(16), false],
+      };
+    });
+
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(batch),
+    });
+    if (!res.ok) throw new Error(`getBlockTimestamps: ${res.status} ${res.statusText}`);
+    const data = (await res.json()) as Array<{ id: number; result: { timestamp: string } | null }>;
+
+    for (const item of data) {
+      const blockNumber = item?.id != null ? idToBlock.get(item.id) : undefined;
+      if (blockNumber != null && item?.result?.timestamp != null) {
+        map.set(blockNumber, parseInt(item.result.timestamp, 16));
+      }
+    }
+  }
+
+  return map;
 }
 
 function* chunkBlockRange(startBlock: bigint, endBlock: bigint): Generator<[bigint, bigint]> {
@@ -70,17 +118,23 @@ function interpolateTimestamp(
   return startTimestamp + Math.round(t);
 }
 
+export interface FetchAllEventsOptions {
+  /** When set, batch-fetch block timestamps and use exact timestamps instead of interpolation. */
+  rpcUrl?: string;
+}
+
 /**
  * Fetch all relevant events for the market within a block range.
  * Chunks the range so each eth_getLogs stays under Infura limit (10k results, 10s timeout).
- * Event timestamps are interpolated from block number using real start/end block timestamps.
+ * When options.rpcUrl is set, uses batch-fetched block timestamps; otherwise interpolates.
  */
 export async function fetchAllEvents(
   client: PublicClient,
   startBlock: bigint,
   endBlock: bigint,
   startTimestamp: number,
-  endTimestamp: number
+  endTimestamp: number,
+  options?: FetchAllEventsOptions
 ): Promise<FetchedEvents> {
   const accrueRaw: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
   const borrowRaw: typeof accrueRaw = [];
@@ -126,8 +180,23 @@ export async function fetchAllEvents(
     await sleep(RPC_DELAY_MS);
   }
 
-  const ts = (blockNumber: bigint) =>
-    interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+  const allBlockNumbers = new Set<bigint>();
+  for (const log of [...accrueRaw, ...borrowRaw, ...repayRaw, ...liquidateRaw]) {
+    allBlockNumbers.add(log.blockNumber);
+  }
+
+  let ts: (blockNumber: bigint) => number;
+  if (options?.rpcUrl && allBlockNumbers.size > 0) {
+    const timestampMap = await getBlockTimestamps(options.rpcUrl, [...allBlockNumbers]);
+    ts = (blockNumber: bigint) => {
+      const t = timestampMap.get(blockNumber);
+      if (t != null) return t;
+      return interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+    };
+  } else {
+    ts = (blockNumber: bigint) =>
+      interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+  }
 
   const accrue: AccrueInterestEvent[] = accrueRaw.map((log) => ({
     type: "accrue" as const,
