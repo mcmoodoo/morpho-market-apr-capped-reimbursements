@@ -2,7 +2,7 @@
 
 ## Overview
 
-Build an off-chain indexer that calculates hourly interest overpayments for borrowers in a Morpho Blue market on Polygon PoS. Borrowers who paid more than 5% APR are refunded the excess.
+Build an off-chain indexer that calculates hourly interest overpayments for borrowers in a Morpho Blue market on Arbitrum One. Borrowers who paid more than 5% APR are refunded the excess.
 
 **Approach**: Raw viem for event fetching. No Morpho SDK (it doesn't support historical event queries).
 
@@ -12,12 +12,12 @@ Build an off-chain indexer that calculates hourly interest overpayments for borr
 
 | Parameter | Value |
 |-----------|-------|
-| Chain | Polygon PoS (chainId: 137) |
-| Morpho Blue | `0x1bF0c2541F820E775182832f06c0B7Fc27A25f67` |
-| Market ID | `0x1cfe584af3db05c7f39d60e458a87a8b2f6b5d8c6125631984ec489f1d13553b` |
-| RPC | `process.env.INFURA_POLYGON_MAINNET_RPC` |
+| Chain | Arbitrum One (chainId: 42161) |
+| Morpho Blue | `0xBBBBBbbBBb9cC5e90e3b3Af64bAF664073807054` |
+| Market ID | (set in config for your Arbitrum market) |
+| RPC | `process.env.ARBITRUM_ONE_RPC` |
 | APR Cap | 5% (0.05) |
-| Scan Range | `currentBlock - 1800` → `currentBlock` (~1 hour) |
+| Scan Range | `currentBlock - BLOCKS_PER_HOUR` → `currentBlock` (~1 hour) |
 | Loan Token | USDC (6 decimals) |
 | Output | `refunds/report-{timestamp}.json` |
 
@@ -97,10 +97,10 @@ const APR_CAP_WAD = (APR_CAP_PERCENT * WAD) / 100n;  // 0.05 * 1e18 = 5e16
 const APR_CAP_PER_SECOND = APR_CAP_WAD / SECONDS_PER_YEAR;  // ~1,585,489,599
 
 // Block range
-const BLOCKS_PER_HOUR = 1800n;               // ~2 seconds per block on Polygon
+const BLOCKS_PER_HOUR = 14400n;              // ~0.25s per block on Arbitrum One (~1 hour)
 
-// Addresses
-const MORPHO_BLUE = "0x1bF0c2541F820E775182832f06c0B7Fc27A25f67" as const;
+// Addresses (Arbitrum One)
+const MORPHO_BLUE = "0xBBBBBbbBBb9cC5e90e3b3Af64bAF664073807054" as const;
 const MARKET_ID = "0x1cfe584af3db05c7f39d60e458a87a8b2f6b5d8c6125631984ec489f1d13553b" as const;
 ```
 
@@ -186,11 +186,11 @@ interface RefundReport {
 
 ```typescript
 import { createPublicClient, http, parseAbiItem, formatUnits } from "viem";
-import { polygon } from "viem/chains";
+import { arbitrum } from "viem/chains";
 
 const client = createPublicClient({
-  chain: polygon,
-  transport: http(process.env.INFURA_POLYGON_MAINNET_RPC),
+  chain: arbitrum,
+  transport: http(process.env.ARBITRUM_ONE_RPC),
 });
 
 // Get block range
@@ -424,7 +424,7 @@ function generateReport(
   
   return {
     marketId: MARKET_ID,
-    chain: "polygon",
+    chain: "arbitrum-one",
     morphoBlue: MORPHO_BLUE,
     thresholdAprPercent: "5.0",
     periodStartBlock: Number(startBlock),
@@ -483,7 +483,7 @@ refunds/                # Output directory
 ```typescript
 // src/scripts/refund-indexer.ts
 import { createPublicClient, http } from "viem";
-import { polygon } from "viem/chains";
+import { arbitrum } from "viem/chains";
 import { MORPHO_BLUE, MARKET_ID, BLOCKS_PER_HOUR } from "../lib/refund/config";
 import { fetchAllEvents } from "../lib/refund/events";
 import { buildTimeline, calculateOverpayments } from "../lib/refund/calculator";
@@ -491,15 +491,15 @@ import { generateReport, writeReport } from "../lib/refund/report";
 
 async function main() {
   // Validate RPC
-  const rpc = process.env.INFURA_POLYGON_MAINNET_RPC;
+  const rpc = process.env.ARBITRUM_ONE_RPC;
   if (!rpc) {
-    console.error("Error: INFURA_POLYGON_MAINNET_RPC not set");
+    console.error("Error: ARBITRUM_ONE_RPC not set");
     process.exit(1);
   }
   
   // Create client
   const client = createPublicClient({
-    chain: polygon,
+    chain: arbitrum,
     transport: http(rpc),
   });
   
@@ -571,7 +571,7 @@ main().catch((err) => {
 ```json
 {
   "marketId": "0x1cfe584af3db05c7f39d60e458a87a8b2f6b5d8c6125631984ec489f1d13553b",
-  "chain": "polygon",
+  "chain": "arbitrum-one",
   "morphoBlue": "0x1bF0c2541F820E775182832f06c0B7Fc27A25f67",
   "thresholdAprPercent": "5.0",
   "periodStartBlock": 12345678,
@@ -608,7 +608,7 @@ main().catch((err) => {
 - [ ] Add script: `"refund-indexer": "bun run src/scripts/refund-indexer.ts"`
 
 ### Testing
-- [ ] Run against live Polygon data
+- [ ] Run against live Arbitrum One data
 - [ ] Verify event counts match block explorer
 - [ ] Validate math with manual calculation on small sample
 
@@ -684,7 +684,7 @@ bun run src/scripts/refund-indexer.ts
 
 ## Notes
 
-1. **Block time variability**: Polygon averages ~2s/block but varies. The 1800 block window is approximate.
+1. **Block time variability**: Arbitrum One averages ~0.25s/block but varies. The block window is approximate.
 
 2. **Rate interpretation**: `prevBorrowRate` represents the rate that *was* applied. We use it as the current rate until the next `AccrueInterest` event.
 

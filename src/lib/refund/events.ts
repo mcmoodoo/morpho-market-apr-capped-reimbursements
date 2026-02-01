@@ -29,70 +29,100 @@ export interface FetchedEvents {
   liquidate: LiquidateEvent[];
 }
 
-// Polygon average block time in seconds
-const BLOCK_TIME_SECONDS = 2;
+// Infura (and many RPCs) cap eth_getLogs at 10k results per request; chunk to stay under
+// 50k blocks (~3.5h on Arbitrum) keeps 24h window to ~7 chunks → fewer RPC calls
+const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
-/**
- * Estimate timestamp for a block based on current time and block number
- */
-function estimateTimestamp(
-  blockNumber: bigint,
-  endBlock: bigint,
-  endTimestamp: number
-): number {
-  const blocksDiff = Number(endBlock - blockNumber);
-  return endTimestamp - blocksDiff * BLOCK_TIME_SECONDS;
+function* chunkBlockRange(startBlock: bigint, endBlock: bigint): Generator<[bigint, bigint]> {
+  let from = startBlock;
+  while (from <= endBlock) {
+    const to = from + MAX_BLOCKS_PER_GETLOGS - 1n > endBlock ? endBlock : from + MAX_BLOCKS_PER_GETLOGS - 1n;
+    yield [from, to];
+    from = to + 1n;
+  }
 }
 
 /**
- * Fetch all relevant events for the market within a block range
- * Timestamps are estimated based on block numbers (no eth_getBlockByNumber calls)
+ * Interpolate event timestamp from block number using real start/end block timestamps.
+ * Keeps ordering and proportional elapsed time without per-block RPC calls.
+ */
+function interpolateTimestamp(
+  blockNumber: bigint,
+  startBlock: bigint,
+  endBlock: bigint,
+  startTimestamp: number,
+  endTimestamp: number
+): number {
+  if (startBlock === endBlock) return startTimestamp;
+  const t =
+    (Number(blockNumber - startBlock) / Number(endBlock - startBlock)) *
+    (endTimestamp - startTimestamp);
+  return startTimestamp + Math.round(t);
+}
+
+/**
+ * Fetch all relevant events for the market within a block range.
+ * Chunks the range so each eth_getLogs stays under provider limit (e.g. 10k results).
+ * Event timestamps are interpolated from block number using real start/end block timestamps.
  */
 export async function fetchAllEvents(
   client: PublicClient,
   startBlock: bigint,
   endBlock: bigint,
+  startTimestamp: number,
   endTimestamp: number
 ): Promise<FetchedEvents> {
-  // Fetch event types sequentially to avoid rate limits
-  const accrueRaw = await client.getLogs({
-    address: MORPHO_BLUE,
-    event: ACCRUE_INTEREST_EVENT,
-    args: { id: MARKET_ID },
-    fromBlock: startBlock,
-    toBlock: endBlock,
-  });
+  const accrueRaw: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
+  const borrowRaw: typeof accrueRaw = [];
+  const repayRaw: typeof accrueRaw = [];
+  const liquidateRaw: typeof accrueRaw = [];
 
-  const borrowRaw = await client.getLogs({
-    address: MORPHO_BLUE,
-    event: BORROW_EVENT,
-    args: { id: MARKET_ID },
-    fromBlock: startBlock,
-    toBlock: endBlock,
-  });
+  for (const [from, to] of chunkBlockRange(startBlock, endBlock)) {
+    const [a, b, r, l] = await Promise.all([
+      client.getLogs({
+        address: MORPHO_BLUE,
+        event: ACCRUE_INTEREST_EVENT,
+        args: { id: MARKET_ID },
+        fromBlock: from,
+        toBlock: to,
+      }),
+      client.getLogs({
+        address: MORPHO_BLUE,
+        event: BORROW_EVENT,
+        args: { id: MARKET_ID },
+        fromBlock: from,
+        toBlock: to,
+      }),
+      client.getLogs({
+        address: MORPHO_BLUE,
+        event: REPAY_EVENT,
+        args: { id: MARKET_ID },
+        fromBlock: from,
+        toBlock: to,
+      }),
+      client.getLogs({
+        address: MORPHO_BLUE,
+        event: LIQUIDATE_EVENT,
+        args: { id: MARKET_ID },
+        fromBlock: from,
+        toBlock: to,
+      }),
+    ]);
+    accrueRaw.push(...a);
+    borrowRaw.push(...b);
+    repayRaw.push(...r);
+    liquidateRaw.push(...l);
+  }
 
-  const repayRaw = await client.getLogs({
-    address: MORPHO_BLUE,
-    event: REPAY_EVENT,
-    args: { id: MARKET_ID },
-    fromBlock: startBlock,
-    toBlock: endBlock,
-  });
-
-  const liquidateRaw = await client.getLogs({
-    address: MORPHO_BLUE,
-    event: LIQUIDATE_EVENT,
-    args: { id: MARKET_ID },
-    fromBlock: startBlock,
-    toBlock: endBlock,
-  });
+  const ts = (blockNumber: bigint) =>
+    interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
 
   const accrue: AccrueInterestEvent[] = accrueRaw.map((log) => ({
     type: "accrue" as const,
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
+    timestamp: ts(log.blockNumber),
     prevBorrowRate: log.args.prevBorrowRate!,
   }));
 
@@ -101,7 +131,7 @@ export async function fetchAllEvents(
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
+    timestamp: ts(log.blockNumber),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
   }));
@@ -111,7 +141,7 @@ export async function fetchAllEvents(
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
+    timestamp: ts(log.blockNumber),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
   }));
@@ -121,10 +151,44 @@ export async function fetchAllEvents(
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
-    timestamp: estimateTimestamp(log.blockNumber, endBlock, endTimestamp),
+    timestamp: ts(log.blockNumber),
     borrower: log.args.borrower!,
     repaidAssets: log.args.repaidAssets!,
   }));
 
   return { accrue, borrow, repay, liquidate };
+}
+
+/**
+ * Fetch only AccrueInterest events (used when combining subgraph + RPC).
+ * Chunks the range so each eth_getLogs stays under provider limit (e.g. 10k results).
+ */
+export async function fetchAccrueInterestOnly(
+  client: PublicClient,
+  startBlock: bigint,
+  endBlock: bigint,
+  startTimestamp: number,
+  endTimestamp: number
+): Promise<AccrueInterestEvent[]> {
+  const accrueRaw: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
+  for (const [from, to] of chunkBlockRange(startBlock, endBlock)) {
+    const logs = await client.getLogs({
+      address: MORPHO_BLUE,
+      event: ACCRUE_INTEREST_EVENT,
+      args: { id: MARKET_ID },
+      fromBlock: from,
+      toBlock: to,
+    });
+    accrueRaw.push(...logs);
+  }
+  const ts = (blockNumber: bigint) =>
+    interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+  return accrueRaw.map((log) => ({
+    type: "accrue" as const,
+    blockNumber: log.blockNumber,
+    transactionIndex: log.transactionIndex,
+    logIndex: log.logIndex,
+    timestamp: ts(log.blockNumber),
+    prevBorrowRate: log.args.prevBorrowRate!,
+  }));
 }

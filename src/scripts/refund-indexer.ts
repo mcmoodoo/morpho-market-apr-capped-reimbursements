@@ -1,21 +1,22 @@
 import { createPublicClient, http } from "viem";
-import { polygon } from "viem/chains";
-import { MARKET_ID, BLOCKS_PER_HOUR, APR_CAP_PERCENT } from "../lib/refund/config.ts";
+import { arbitrum } from "viem/chains";
+import { MARKET_ID, BLOCKS_PER_24_HOURS, APR_CAP_PERCENT } from "../lib/refund/config.ts";
 import { fetchAllEvents } from "../lib/refund/events.ts";
+import { fetchAllEventsFromSubgraph } from "../lib/refund/subgraph.ts";
 import { buildTimeline, calculateOverpayments } from "../lib/refund/calculator.ts";
 import { generateReport, writeReport } from "../lib/refund/report.ts";
 
 async function main() {
-  // Validate RPC
-  const rpc = process.env.INFURA_POLYGON_MAINNET_RPC;
+  const useSubgraph = Boolean(process.env.SUBGRAPH_URL);
+
+  const rpc = process.env.INFURA_ARBITRUM_MAINNET_RPC;
   if (!rpc) {
-    console.error("Error: INFURA_POLYGON_MAINNET_RPC not set");
+    console.error("Error: INFURA_ARBITRUM_MAINNET_RPC not set");
     process.exit(1);
   }
 
-  // Create client
   const client = createPublicClient({
-    chain: polygon,
+    chain: arbitrum,
     transport: http(rpc),
   });
 
@@ -23,25 +24,30 @@ async function main() {
   console.log("==========================");
   console.log(`Market: ${MARKET_ID}`);
   console.log(`APR Cap: ${APR_CAP_PERCENT}%`);
+  console.log(`Data source: ${useSubgraph ? "subgraph" : "RPC"}`);
 
-  // Get block range
+  // Block range: last 24 hours
   const currentBlock = await client.getBlockNumber();
-  const startBlock = currentBlock - BLOCKS_PER_HOUR;
+  const startBlock = currentBlock - BLOCKS_PER_24_HOURS;
 
   console.log(`\nBlock range: ${startBlock} → ${currentBlock}`);
 
-  // Estimate timestamps based on block numbers (no RPC calls needed)
-  // Polygon ~2 seconds per block
-  const BLOCK_TIME_SECONDS = 2;
-  const endTimestamp = Math.floor(Date.now() / 1000);
-  const startTimestamp = endTimestamp - Number(BLOCKS_PER_HOUR) * BLOCK_TIME_SECONDS;
+  // Real timestamps from chain (2 getBlock calls) — no estimation
+  const [startBlockData, endBlockData] = await Promise.all([
+    client.getBlock({ blockNumber: startBlock }),
+    client.getBlock({ blockNumber: currentBlock }),
+  ]);
+  const startTimestamp = Number(startBlockData.timestamp);
+  const endTimestamp = Number(endBlockData.timestamp);
 
-  const durationMinutes = Math.round((endTimestamp - startTimestamp) / 60);
-  console.log(`Time range: ~${durationMinutes} minutes (estimated)`);
+  const durationHours = ((endTimestamp - startTimestamp) / 3600).toFixed(1);
+  console.log(`Time range: ${durationHours} hours`);
 
-  // Fetch events
+  // Fetch events from subgraph (Borrow/Repay/Liquidate) + RPC (AccrueInterest), or RPC only
   console.log("\nFetching events...");
-  const events = await fetchAllEvents(client, startBlock, currentBlock, endTimestamp);
+  const events = useSubgraph
+    ? await fetchAllEventsFromSubgraph(client, startBlock, currentBlock, startTimestamp, endTimestamp)
+    : await fetchAllEvents(client, startBlock, currentBlock, startTimestamp, endTimestamp);
   console.log(`  AccrueInterest: ${events.accrue.length}`);
   console.log(`  Borrow: ${events.borrow.length}`);
   console.log(`  Repay: ${events.repay.length}`);

@@ -8,11 +8,12 @@ export const APR_CAP_PERCENT = 1n; // 1%
 export const APR_CAP_WAD = (APR_CAP_PERCENT * WAD) / 100n; // 0.01 * 1e18 = 1e16
 export const APR_CAP_PER_SECOND = APR_CAP_WAD / SECONDS_PER_YEAR; // ~317,097,919
 
-// Block range
-export const BLOCKS_PER_HOUR = 93n; // Last 50 blocks (~1.5 min on Polygon)
+// Block range (Arbitrum One ~0.25s per block)
+// 24h = 86,400s → 86,400 / 0.25 = 345,600 blocks
+export const BLOCKS_PER_24_HOURS = 345_600n;
 
-// Addresses
+// Addresses (Arbitrum One)
 export const MORPHO_BLUE =
-  "0x1bF0c2541F820E775182832f06c0B7Fc27A25f67" as const;
+  "0x6c247b1F6182318877311737BaC0844bAa518F5e" as const;
 export const MARKET_ID =
-  "0x1cfe584af3db05c7f39d60e458a87a8b2f6b5d8c6125631984ec489f1d13553b" as const;
+  "0xe6392ff19d10454b099d692b58c361ef93e31af34ed1ef78232e07c78fe99169" as const;

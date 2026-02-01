@@ -33,7 +33,7 @@ export function generateReport(
 
   return {
     marketId: MARKET_ID,
-    chain: "polygon",
+    chain: "arbitrum-one",
     morphoBlue: MORPHO_BLUE,
     thresholdAprPercent: `${APR_CAP_PERCENT}.0`,
     periodStartBlock: Number(startBlock),
