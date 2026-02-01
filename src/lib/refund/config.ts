@@ -9,8 +9,8 @@ export const APR_CAP_WAD = (APR_CAP_PERCENT * WAD) / 100n; // 0.01 * 1e18 = 1e16
 export const APR_CAP_PER_SECOND = APR_CAP_WAD / SECONDS_PER_YEAR; // ~317,097,919
 
 // Block range (Arbitrum One ~0.25s per block)
-// 3h = 10,800s → 10,800 / 0.25 = 43,200 blocks
-export const BLOCKS_PER_3_HOURS = 43_200n;
+// 24h = 86,400s → 86,400 / 0.25 = 345,600 blocks
+export const BLOCKS_PER_24_HOURS = 345_600n;
 
 // Addresses (Arbitrum One)
 export const MORPHO_BLUE =

@@ -1,6 +1,6 @@
 import { createPublicClient, http } from "viem";
 import { arbitrum } from "viem/chains";
-import { MARKET_ID, BLOCKS_PER_3_HOURS, APR_CAP_PERCENT } from "../lib/refund/config.ts";
+import { MARKET_ID, BLOCKS_PER_24_HOURS, APR_CAP_PERCENT } from "../lib/refund/config.ts";
 import { fetchAllEvents } from "../lib/refund/events.ts";
 import { buildTimeline, calculateOverpayments } from "../lib/refund/calculator.ts";
 import { generateReport, writeReport } from "../lib/refund/report.ts";
@@ -23,9 +23,9 @@ async function main() {
   console.log(`Market: ${MARKET_ID}`);
   console.log(`APR Cap: ${APR_CAP_PERCENT}%`);
 
-  // Block range: last 3 hours
+  // Block range: last 24 hours
   const currentBlock = await client.getBlockNumber();
-  const startBlock = currentBlock - BLOCKS_PER_3_HOURS;
+  const startBlock = currentBlock - BLOCKS_PER_24_HOURS;
 
   console.log(`\nBlock range: ${startBlock} → ${currentBlock}`);
 

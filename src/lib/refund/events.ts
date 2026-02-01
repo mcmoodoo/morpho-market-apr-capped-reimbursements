@@ -36,6 +36,13 @@ export interface FetchedEvents {
 // Chunk by block range so each request stays under 10k results; 50k blocks (~3.5h on Arbitrum) keeps 24h to ~7 chunks.
 const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
+// Delay between eth_getLogs calls to avoid Infura 429 Too Many Requests (rate limit).
+const RPC_DELAY_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function* chunkBlockRange(startBlock: bigint, endBlock: bigint): Generator<[bigint, bigint]> {
   let from = startBlock;
   while (from <= endBlock) {
@@ -81,40 +88,42 @@ export async function fetchAllEvents(
   const liquidateRaw: typeof accrueRaw = [];
 
   for (const [from, to] of chunkBlockRange(startBlock, endBlock)) {
-    const [a, b, r, l] = await Promise.all([
-      client.getLogs({
-        address: MORPHO_BLUE,
-        event: ACCRUE_INTEREST_EVENT,
-        args: { id: MARKET_ID },
-        fromBlock: from,
-        toBlock: to,
-      }),
-      client.getLogs({
-        address: MORPHO_BLUE,
-        event: BORROW_EVENT,
-        args: { id: MARKET_ID },
-        fromBlock: from,
-        toBlock: to,
-      }),
-      client.getLogs({
-        address: MORPHO_BLUE,
-        event: REPAY_EVENT,
-        args: { id: MARKET_ID },
-        fromBlock: from,
-        toBlock: to,
-      }),
-      client.getLogs({
-        address: MORPHO_BLUE,
-        event: LIQUIDATE_EVENT,
-        args: { id: MARKET_ID },
-        fromBlock: from,
-        toBlock: to,
-      }),
-    ]);
+    const a = await client.getLogs({
+      address: MORPHO_BLUE,
+      event: ACCRUE_INTEREST_EVENT,
+      args: { id: MARKET_ID },
+      fromBlock: from,
+      toBlock: to,
+    });
+    await sleep(RPC_DELAY_MS);
+    const b = await client.getLogs({
+      address: MORPHO_BLUE,
+      event: BORROW_EVENT,
+      args: { id: MARKET_ID },
+      fromBlock: from,
+      toBlock: to,
+    });
+    await sleep(RPC_DELAY_MS);
+    const r = await client.getLogs({
+      address: MORPHO_BLUE,
+      event: REPAY_EVENT,
+      args: { id: MARKET_ID },
+      fromBlock: from,
+      toBlock: to,
+    });
+    await sleep(RPC_DELAY_MS);
+    const l = await client.getLogs({
+      address: MORPHO_BLUE,
+      event: LIQUIDATE_EVENT,
+      args: { id: MARKET_ID },
+      fromBlock: from,
+      toBlock: to,
+    });
     accrueRaw.push(...a);
     borrowRaw.push(...b);
     repayRaw.push(...r);
     liquidateRaw.push(...l);
+    await sleep(RPC_DELAY_MS);
   }
 
   const ts = (blockNumber: bigint) =>
@@ -164,7 +173,7 @@ export async function fetchAllEvents(
 
 /**
  * Fetch only AccrueInterest events. Chunks the range so each eth_getLogs
- * stays under provider limit (e.g. 10k results).
+ * stays under Infura limit (10k results, 10s timeout).
  */
 export async function fetchAccrueInterestOnly(
   client: PublicClient,
@@ -183,6 +192,7 @@ export async function fetchAccrueInterestOnly(
       toBlock: to,
     });
     accrueRaw.push(...logs);
+    await sleep(RPC_DELAY_MS);
   }
   const ts = (blockNumber: bigint) =>
     interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
