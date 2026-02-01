@@ -29,8 +29,11 @@ export interface FetchedEvents {
   liquidate: LiquidateEvent[];
 }
 
-// Infura (and many RPCs) cap eth_getLogs at 10k results per request; chunk to stay under
-// 50k blocks (~3.5h on Arbitrum) keeps 24h window to ~7 chunks → fewer RPC calls
+// Infura eth_getLogs constraints (https://docs.metamask.io/services/reference/ethereum/json-rpc-methods/eth_getlogs):
+// - max 10,000 results per query
+// - max 10s query duration
+// - max 5,000 parameters per request
+// Chunk by block range so each request stays under 10k results; 50k blocks (~3.5h on Arbitrum) keeps 24h to ~7 chunks.
 const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
 function* chunkBlockRange(startBlock: bigint, endBlock: bigint): Generator<[bigint, bigint]> {
@@ -62,7 +65,7 @@ function interpolateTimestamp(
 
 /**
  * Fetch all relevant events for the market within a block range.
- * Chunks the range so each eth_getLogs stays under provider limit (e.g. 10k results).
+ * Chunks the range so each eth_getLogs stays under Infura limit (10k results, 10s timeout).
  * Event timestamps are interpolated from block number using real start/end block timestamps.
  */
 export async function fetchAllEvents(
@@ -160,8 +163,8 @@ export async function fetchAllEvents(
 }
 
 /**
- * Fetch only AccrueInterest events (used when combining subgraph + RPC).
- * Chunks the range so each eth_getLogs stays under provider limit (e.g. 10k results).
+ * Fetch only AccrueInterest events. Chunks the range so each eth_getLogs
+ * stays under provider limit (e.g. 10k results).
  */
 export async function fetchAccrueInterestOnly(
   client: PublicClient,

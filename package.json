@@ -4,8 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "refund-indexer": "bun run src/scripts/refund-indexer.ts",
-    "hit-subgraph": "SUBGRAPH_URL=\"https://gateway.thegraph.com/api/$SUBGRAPH_API_KEY/subgraphs/id/8Lz789DP5VKLXumTMTgygjU2xtuzx8AhbaacgN5PYCAs\" bun run refund-indexer"
+    "refund-indexer": "bun run src/scripts/refund-indexer.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
