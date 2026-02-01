@@ -63,8 +63,12 @@ async function main() {
   ]);
   const startTimestamp = Number(startBlockData.timestamp);
   const endTimestamp = Number(endBlockData.timestamp);
+  const now = Math.floor(Date.now() / 1000);
+  const startHoursAgo = ((now - startTimestamp) / 3600).toFixed(1);
+  const endHoursAgo = ((now - endTimestamp) / 3600).toFixed(1);
   const durationHours = ((endTimestamp - startTimestamp) / 3600).toFixed(1);
-  console.log(`Time range: ${durationHours} hours`);
+  console.log(`Time range: from ${startHoursAgo}h ago to ${endHoursAgo}h ago (${durationHours}h span)`);
+  console.log(`  ${new Date(startTimestamp * 1000).toISOString()} → ${new Date(endTimestamp * 1000).toISOString()}`);
 
   if (fallbackToInterpolation) {
     console.log("(fallbackToInterpolation enabled: will interpolate if a block timestamp is missing)");
