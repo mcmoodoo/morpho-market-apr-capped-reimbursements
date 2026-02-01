@@ -3,6 +3,8 @@
  * SQLite via Bun, one table, JSON payload. Good for backfill + live sync.
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
 import type { TimelineEvent } from "./types.ts";
 
@@ -12,6 +14,7 @@ let db: Database | null = null;
 
 function getDb(): Database {
   if (!db) {
+    mkdirSync(dirname(DB_PATH), { recursive: true });
     db = new Database(DB_PATH, { create: true });
     db.run(`
       CREATE TABLE IF NOT EXISTS events (
