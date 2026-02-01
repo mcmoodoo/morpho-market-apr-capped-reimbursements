@@ -191,8 +191,10 @@ export async function fetchAllEvents(
   }
 
   let ts: (blockNumber: bigint) => number;
+  const blockTimestamps = new Map<bigint, number>();
   if (options?.rpcUrl && allBlockNumbers.size > 0) {
     const timestampMap = await getBlockTimestamps(options.rpcUrl, [...allBlockNumbers]);
+    for (const [block, t] of timestampMap) blockTimestamps.set(block, t);
     const fallback = options.fallbackToInterpolation === true;
     ts = (blockNumber: bigint) => {
       const t = timestampMap.get(blockNumber);
@@ -246,7 +248,7 @@ export async function fetchAllEvents(
     repaidAssets: log.args.repaidAssets!,
   }));
 
-  return { accrue, borrow, repay, liquidate };
+  return { events: { accrue, borrow, repay, liquidate }, blockTimestamps };
 }
 
 /**

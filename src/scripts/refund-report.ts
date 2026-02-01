@@ -1,39 +1,37 @@
-import { createPublicClient, http } from "viem";
-import { arbitrum } from "viem/chains";
 import { formatUnits } from "viem";
 import { MARKET_ID, BLOCKS_PER_24_HOURS, APR_CAP_PERCENT, USDC_DECIMALS } from "../lib/refund/config.ts";
-import { getEvents } from "../lib/refund/db.ts";
+import {
+  getBlockTimestamp,
+  getEvents,
+  getLastSyncedBlock,
+  populateBlockTimestampsFromEvents,
+} from "../lib/refund/db.ts";
 import { calculateOverpayments } from "../lib/refund/calculator.ts";
 import { generateReport, writeReport } from "../lib/refund/report.ts";
 
 async function main() {
-  const rpc = process.env.INFURA_ARBITRUM_MAINNET_RPC;
-  if (!rpc) {
-    console.error("Error: INFURA_ARBITRUM_MAINNET_RPC not set");
-    process.exit(1);
+  // Ensure block_timestamps is populated from events payloads (no RPC)
+  populateBlockTimestampsFromEvents(MARKET_ID);
+
+  // Report window: last 24h of synced data
+  const endBlock = getLastSyncedBlock(MARKET_ID);
+  if (endBlock === null) {
+    console.log("No events in DB. Run the sync script first.");
+    process.exit(0);
   }
 
-  const client = createPublicClient({
-    chain: arbitrum,
-    transport: http(rpc),
-  });
-
-  // Block range: last 24 hours (same as sync)
-  const currentBlock = await client.getBlockNumber();
-  const startBlock = currentBlock - BLOCKS_PER_24_HOURS;
-
-  const [startBlockData, endBlockData] = await Promise.all([
-    client.getBlock({ blockNumber: startBlock }),
-    client.getBlock({ blockNumber: currentBlock }),
-  ]);
-  const startTimestamp = Number(startBlockData.timestamp);
-  const endTimestamp = Number(endBlockData.timestamp);
-
-  const timeline = getEvents(MARKET_ID, startBlock, currentBlock);
+  const startBlock = endBlock - BLOCKS_PER_24_HOURS;
+  const timeline = getEvents(MARKET_ID, startBlock, endBlock);
   if (timeline.length === 0) {
     console.log("No events in DB for this range. Run the sync script first.");
     process.exit(0);
   }
+
+  // Use block_timestamps when available; otherwise first/last event timestamp in range
+  const startTimestamp =
+    getBlockTimestamp(startBlock) ?? timeline[0].timestamp;
+  const endTimestamp =
+    getBlockTimestamp(endBlock) ?? timeline[timeline.length - 1].timestamp;
 
   const overpayments = calculateOverpayments(
     timeline,
@@ -46,7 +44,7 @@ async function main() {
   console.log("=========================");
   console.log(`Market: ${MARKET_ID}`);
   console.log(`APR Cap: ${APR_CAP_PERCENT}%`);
-  console.log(`Block range: ${startBlock} → ${currentBlock}`);
+  console.log(`Block range: ${startBlock} → ${endBlock}`);
   console.log(`Events: ${timeline.length}`);
   console.log("");
 
@@ -77,7 +75,7 @@ async function main() {
   const report = generateReport(
     overpayments,
     startBlock,
-    currentBlock,
+    endBlock,
     startTimestamp,
     endTimestamp
   );

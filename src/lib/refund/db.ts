@@ -30,8 +30,51 @@ function getDb(): Database {
     db.run(
       `CREATE INDEX IF NOT EXISTS idx_events_market_block ON events (market_id, block_number)`
     );
+    db.run(`
+      CREATE TABLE IF NOT EXISTS block_timestamps (
+        block_number INTEGER PRIMARY KEY,
+        timestamp INTEGER NOT NULL
+      )
+    `);
   }
   return db;
+}
+
+/** Insert block timestamps (from sync). Idempotent: same block_number is replaced. */
+export function insertBlockTimestamps(entries: Iterable<[bigint, number]>): void {
+  const d = getDb();
+  const stmt = d.prepare(
+    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)`
+  );
+  d.transaction(() => {
+    for (const [blockNumber, timestamp] of entries) {
+      stmt.run(Number(blockNumber), timestamp);
+    }
+  })();
+}
+
+/** Get block timestamp from DB, or null if not stored. */
+export function getBlockTimestamp(blockNumber: bigint): number | null {
+  const d = getDb();
+  const row = d
+    .query(`SELECT timestamp FROM block_timestamps WHERE block_number = ?`)
+    .get(Number(blockNumber)) as { timestamp: number } | undefined;
+  return row?.timestamp ?? null;
+}
+
+/**
+ * Populate block_timestamps from events table payloads (timestamp per block).
+ * Idempotent: merges in; existing rows are replaced.
+ */
+export function populateBlockTimestampsFromEvents(marketId: string): void {
+  const d = getDb();
+  d.run(
+    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp)
+     SELECT block_number, MIN(CAST(json_extract(payload, '$.timestamp') AS INTEGER))
+     FROM events WHERE market_id = ? AND json_extract(payload, '$.timestamp') IS NOT NULL
+     GROUP BY block_number`,
+    marketId.toLowerCase()
+  );
 }
 
 function eventToPayload(event: TimelineEvent): string {

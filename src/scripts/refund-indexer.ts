@@ -3,7 +3,7 @@ import { arbitrum } from "viem/chains";
 import { MARKET_ID, BLOCKS_PER_24_HOURS, BLOCKS_PER_1_HOUR } from "../lib/refund/config.ts";
 import { fetchAllEvents } from "../lib/refund/events.ts";
 import { buildTimeline } from "../lib/refund/calculator.ts";
-import { getLastSyncedBlock, insertEvents } from "../lib/refund/db.ts";
+import { getLastSyncedBlock, insertBlockTimestamps, insertEvents } from "../lib/refund/db.ts";
 
 const FALLBACK_FLAGS = ["--fallback-to-interpolation", "-f"];
 
@@ -74,7 +74,7 @@ async function main() {
     console.log("(fallbackToInterpolation enabled: will interpolate if a block timestamp is missing)");
   }
   console.log("\nFetching events from RPC...");
-  const events = await fetchAllEvents(
+  const { events, blockTimestamps } = await fetchAllEvents(
     client,
     fetchFromBlock,
     fetchToBlock,
@@ -98,6 +98,10 @@ async function main() {
   console.log("Saving events to DB...");
   insertEvents(MARKET_ID, timeline);
   console.log(`  Saved ${timeline.length} events`);
+  if (blockTimestamps.size > 0) {
+    insertBlockTimestamps(blockTimestamps);
+    console.log(`  Saved ${blockTimestamps.size} block timestamps`);
+  }
 
   console.log("\nSync done.");
 }
