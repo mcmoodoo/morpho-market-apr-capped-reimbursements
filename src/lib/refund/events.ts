@@ -121,6 +121,11 @@ function interpolateTimestamp(
 export interface FetchAllEventsOptions {
   /** When set, batch-fetch block timestamps and use exact timestamps instead of interpolation. */
   rpcUrl?: string;
+  /**
+   * When true and using rpcUrl, fall back to interpolated timestamp if a block is missing from the batch response.
+   * When false (default), throw if any block timestamp is missing.
+   */
+  fallbackToInterpolation?: boolean;
 }
 
 /**
@@ -188,10 +193,14 @@ export async function fetchAllEvents(
   let ts: (blockNumber: bigint) => number;
   if (options?.rpcUrl && allBlockNumbers.size > 0) {
     const timestampMap = await getBlockTimestamps(options.rpcUrl, [...allBlockNumbers]);
+    const fallback = options.fallbackToInterpolation === true;
     ts = (blockNumber: bigint) => {
       const t = timestampMap.get(blockNumber);
       if (t != null) return t;
-      return interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+      if (fallback) {
+        return interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
+      }
+      throw new Error(`Missing block timestamp for block ${blockNumber} (fallbackToInterpolation is disabled)`);
     };
   } else {
     ts = (blockNumber: bigint) =>
