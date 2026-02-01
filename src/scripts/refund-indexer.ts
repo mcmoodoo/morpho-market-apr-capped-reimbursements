@@ -39,22 +39,39 @@ async function main() {
   const durationHours = ((endTimestamp - startTimestamp) / 3600).toFixed(1);
   console.log(`Time range: ${durationHours} hours`);
 
-  // Use DB if we already have events covering this range (skip RPC getLogs)
+  // Incremental sync: use DB up to last synced block, fetch only new range from RPC
   const lastSynced = getLastSyncedBlock(MARKET_ID);
-  const rangeCovered = lastSynced !== null && lastSynced >= currentBlock;
+  const fetchFromBlock =
+    lastSynced === null || lastSynced < startBlock
+      ? startBlock
+      : lastSynced + 1n;
 
-  let timeline: ReturnType<typeof buildTimeline> extends Promise<infer T> ? T : ReturnType<typeof buildTimeline>;
-  if (rangeCovered) {
-    console.log("\nUsing events from DB (range already synced, skipping RPC getLogs)");
+  let timeline: Awaited<ReturnType<typeof getEvents>>;
+  if (fetchFromBlock > currentBlock) {
+    console.log("\nUsing events from DB (range already synced)");
     timeline = getEvents(MARKET_ID, startBlock, currentBlock);
     console.log(`  Timeline events: ${timeline.length}`);
   } else {
-    console.log("\nFetching events from RPC...");
+    const dbEvents =
+      lastSynced !== null && lastSynced >= startBlock
+        ? getEvents(MARKET_ID, startBlock, lastSynced)
+        : [];
+    if (dbEvents.length > 0) {
+      console.log(`\nUsing events from DB for blocks ${startBlock}..${lastSynced} (${dbEvents.length} events)`);
+    }
+
+    const fetchStartBlockData =
+      fetchFromBlock > startBlock
+        ? await client.getBlock({ blockNumber: fetchFromBlock })
+        : startBlockData;
+    const fetchStartTimestamp = Number(fetchStartBlockData.timestamp);
+
+    console.log(`\nFetching events from RPC for blocks ${fetchFromBlock}..${currentBlock}`);
     const events = await fetchAllEvents(
       client,
-      startBlock,
+      fetchFromBlock,
       currentBlock,
-      startTimestamp,
+      fetchStartTimestamp,
       endTimestamp
     );
     console.log(`  AccrueInterest: ${events.accrue.length}`);
@@ -62,17 +79,18 @@ async function main() {
     console.log(`  Repay: ${events.repay.length}`);
     console.log(`  Liquidate: ${events.liquidate.length}`);
 
-    timeline = buildTimeline(
+    const newTimeline = buildTimeline(
       events.accrue,
       events.borrow,
       events.repay,
       events.liquidate
     );
-    console.log(`\nTimeline events: ${timeline.length}`);
+    timeline = [...dbEvents, ...newTimeline];
+    console.log(`\nTimeline events: ${timeline.length} (${dbEvents.length} from DB + ${newTimeline.length} new)`);
 
-    console.log("Saving events to DB...");
-    insertEvents(MARKET_ID, timeline);
-    console.log(`  Saved ${timeline.length} events`);
+    console.log("Saving new events to DB...");
+    insertEvents(MARKET_ID, newTimeline);
+    console.log(`  Saved ${newTimeline.length} events`);
   }
 
   // Calculate overpayments
