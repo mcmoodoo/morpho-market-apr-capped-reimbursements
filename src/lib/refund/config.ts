@@ -11,6 +11,8 @@ export const APR_CAP_PER_SECOND = APR_CAP_WAD / SECONDS_PER_YEAR; // ~317,097,91
 // Block range (Arbitrum One ~0.25s per block)
 // 24h = 86,400s → 86,400 / 0.25 = 345,600 blocks
 export const BLOCKS_PER_24_HOURS = 345_600n;
+// 1h = 3,600s → 3,600 / 0.25 = 14,400 blocks (chunk size per sync run)
+export const BLOCKS_PER_1_HOUR = 14_400n;
 
 // Addresses (Arbitrum One)
 export const MORPHO_BLUE =

@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "sync-events": "bun run src/scripts/refund-indexer.ts",
-    "refund-report": "bun run src/scripts/refund-report.ts"
+    "refund-report": "bun run src/scripts/refund-report.ts",
+    "view-db": "nohup sqlitebrowser data/events.db & disown"
   },
   "devDependencies": {
     "@types/bun": "latest"
