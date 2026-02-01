@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "refund-indexer": "bun run src/scripts/refund-indexer.ts"
+    "sync-events": "bun run src/scripts/refund-indexer.ts",
+    "refund-report": "bun run src/scripts/refund-report.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

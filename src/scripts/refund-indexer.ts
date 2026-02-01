@@ -1,9 +1,8 @@
 import { createPublicClient, http } from "viem";
 import { arbitrum } from "viem/chains";
-import { MARKET_ID, BLOCKS_PER_24_HOURS, APR_CAP_PERCENT } from "../lib/refund/config.ts";
+import { MARKET_ID, BLOCKS_PER_24_HOURS } from "../lib/refund/config.ts";
 import { fetchAllEvents } from "../lib/refund/events.ts";
-import { buildTimeline, calculateOverpayments } from "../lib/refund/calculator.ts";
-import { generateReport, writeReport } from "../lib/refund/report.ts";
+import { buildTimeline } from "../lib/refund/calculator.ts";
 import { getEvents, getLastSyncedBlock, insertEvents } from "../lib/refund/db.ts";
 
 async function main() {
@@ -18,10 +17,9 @@ async function main() {
     transport: http(rpc),
   });
 
-  console.log("Morpho Blue Refund Indexer");
-  console.log("==========================");
+  console.log("Morpho Blue Event Sync");
+  console.log("======================");
   console.log(`Market: ${MARKET_ID}`);
-  console.log(`APR Cap: ${APR_CAP_PERCENT}%`);
 
   // Block range: last 24 hours
   const currentBlock = await client.getBlockNumber();
@@ -46,10 +44,9 @@ async function main() {
       ? startBlock
       : lastSynced + 1n;
 
-  let timeline: Awaited<ReturnType<typeof getEvents>>;
   if (fetchFromBlock > currentBlock) {
     console.log("\nUsing events from DB (range already synced)");
-    timeline = getEvents(MARKET_ID, startBlock, currentBlock);
+    const timeline = getEvents(MARKET_ID, startBlock, currentBlock);
     console.log(`  Timeline events: ${timeline.length}`);
   } else {
     const dbEvents =
@@ -85,32 +82,14 @@ async function main() {
       events.repay,
       events.liquidate
     );
-    timeline = [...dbEvents, ...newTimeline];
-    console.log(`\nTimeline events: ${timeline.length} (${dbEvents.length} from DB + ${newTimeline.length} new)`);
+    console.log(`\nTimeline events: ${dbEvents.length + newTimeline.length} (${dbEvents.length} from DB + ${newTimeline.length} new)`);
 
     console.log("Saving new events to DB...");
     insertEvents(MARKET_ID, newTimeline);
     console.log(`  Saved ${newTimeline.length} events`);
   }
 
-  // Calculate overpayments
-  console.log("\nCalculating overpayments...");
-  const overpayments = calculateOverpayments(
-    timeline,
-    startTimestamp,
-    endTimestamp
-  );
-
-  const report = generateReport(
-    overpayments,
-    startBlock,
-    currentBlock,
-    startTimestamp,
-    endTimestamp
-  );
-
-  console.log("");
-  await writeReport(report);
+  console.log("\nSync done.");
 }
 
 main().catch((err) => {
