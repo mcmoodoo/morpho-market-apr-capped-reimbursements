@@ -2,6 +2,10 @@
 
 Morpho Blue refund indexer: computes hourly overpayments for borrowers when the market rate exceeds an APR cap (e.g. 5%).
 
+## Docs
+
+- **Morpho (LLM reference):** https://docs.morpho.org/llms-all.txt
+
 ## Setup
 
 ```bash
