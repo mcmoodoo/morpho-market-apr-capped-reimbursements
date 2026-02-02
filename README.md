@@ -1,10 +1,6 @@
 # rate-rebate
 
-Morpho Blue refund indexer: computes hourly overpayments for borrowers when the market rate exceeds an APR cap (e.g. 5%).
-
-## Docs
-
-- **Morpho (LLM reference):** https://docs.morpho.org/llms-all.txt
+Sync Morpho Blue events (Borrow, Repay, Liquidate, AccrueInterest) for a fixed block range into SQLite.
 
 ## Setup
 
@@ -14,12 +10,12 @@ bun install
 
 ## Environment
 
-- **INFURA_ARBITRUM_MAINNET_RPC** (required) – Arbitrum One RPC URL (block range and event logs).
+- **INFURA_ARBITRUM_MAINNET_RPC** – Arbitrum One RPC URL.
 
 ## Run
 
 ```bash
-bun run refund-indexer
-# or
-bun run src/scripts/refund-indexer.ts
+bun run sync
 ```
+
+Clears the DB, then fetches blocks **427663781 → 427682051** and saves events to `./data/events.db`.

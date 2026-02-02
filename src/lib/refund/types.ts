@@ -1,4 +1,3 @@
-// Event types — only fields needed for ordering + reimbursement math
 export interface AccrueInterestEvent {
   type: "accrue";
   blockNumber: bigint;
@@ -43,24 +42,3 @@ export type TimelineEvent =
   | BorrowEvent
   | RepayEvent
   | LiquidateEvent;
-
-// Output
-export interface BorrowerRefund {
-  address: string;
-  overpayment: string;
-}
-
-export interface RefundReport {
-  marketId: string;
-  chain: string;
-  morphoBlue: string;
-  thresholdAprPercent: string;
-  periodStartBlock: number;
-  periodEndBlock: number;
-  periodStartTimestamp: number;
-  periodEndTimestamp: number;
-  totalOverpayment: string;
-  borrowerCount: number;
-  borrowers: BorrowerRefund[];
-  generatedAt: string;
-}

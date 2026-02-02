@@ -1,6 +1,5 @@
 /**
- * Simplest DB for storing Morpho events (Borrow, Repay, Liquidate, AccrueInterest).
- * SQLite via Bun, one table, JSON payload. Good for backfill + live sync.
+ * SQLite DB for Morpho events (Borrow, Repay, Liquidate, AccrueInterest).
  */
 
 import { mkdirSync } from "node:fs";
@@ -40,41 +39,11 @@ function getDb(): Database {
   return db;
 }
 
-/** Insert block timestamps (from sync). Idempotent: same block_number is replaced. */
-export function insertBlockTimestamps(entries: Iterable<[bigint, number]>): void {
+/** Clear all events and block_timestamps. Call before each sync. */
+export function clearDb(): void {
   const d = getDb();
-  const stmt = d.prepare(
-    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)`
-  );
-  d.transaction(() => {
-    for (const [blockNumber, timestamp] of entries) {
-      stmt.run(Number(blockNumber), timestamp);
-    }
-  })();
-}
-
-/** Get block timestamp from DB, or null if not stored. */
-export function getBlockTimestamp(blockNumber: bigint): number | null {
-  const d = getDb();
-  const row = d
-    .query(`SELECT timestamp FROM block_timestamps WHERE block_number = ?`)
-    .get(Number(blockNumber)) as { timestamp: number } | undefined;
-  return row?.timestamp ?? null;
-}
-
-/**
- * Populate block_timestamps from events table payloads (timestamp per block).
- * Idempotent: merges in; existing rows are replaced.
- */
-export function populateBlockTimestampsFromEvents(marketId: string): void {
-  const d = getDb();
-  d.run(
-    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp)
-     SELECT block_number, MIN(CAST(json_extract(payload, '$.timestamp') AS INTEGER))
-     FROM events WHERE market_id = ? AND json_extract(payload, '$.timestamp') IS NOT NULL
-     GROUP BY block_number`,
-    marketId.toLowerCase()
-  );
+  d.run("DELETE FROM events");
+  d.run("DELETE FROM block_timestamps");
 }
 
 function eventToPayload(event: TimelineEvent): string {
@@ -83,22 +52,6 @@ function eventToPayload(event: TimelineEvent): string {
   );
 }
 
-/** Insert one event. Idempotent: same (market_id, block, tx_index, log_index) is replaced. */
-export function insertEvent(marketId: string, event: TimelineEvent): void {
-  const d = getDb();
-  d.run(
-    `INSERT OR REPLACE INTO events (market_id, block_number, tx_index, log_index, event_type, payload)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    marketId.toLowerCase(),
-    Number(event.blockNumber),
-    event.transactionIndex,
-    event.logIndex,
-    event.type,
-    eventToPayload(event)
-  );
-}
-
-/** Insert many events in one transaction. */
 export function insertEvents(marketId: string, events: TimelineEvent[]): void {
   const d = getDb();
   const stmt = d.prepare(
@@ -120,60 +73,16 @@ export function insertEvents(marketId: string, events: TimelineEvent[]): void {
   })();
 }
 
-/** Read events for a market in order (for replay). Optionally filter by block range. */
-export function getEvents(
-  marketId: string,
-  fromBlock?: bigint,
-  toBlock?: bigint
-): TimelineEvent[] {
+export function insertBlockTimestamps(
+  entries: Iterable<[bigint, number]>
+): void {
   const d = getDb();
-  let sql = `SELECT payload FROM events WHERE market_id = ?`;
-  const args: (string | number)[] = [marketId.toLowerCase()];
-  if (fromBlock !== undefined) {
-    sql += ` AND block_number >= ?`;
-    args.push(Number(fromBlock));
-  }
-  if (toBlock !== undefined) {
-    sql += ` AND block_number <= ?`;
-    args.push(Number(toBlock));
-  }
-  sql += ` ORDER BY block_number, tx_index, log_index`;
-
-  const rows = d.query(sql).all(...args) as { payload: string }[];
-  return rows.map((r) => reviveEvent(JSON.parse(r.payload)));
-}
-
-const BIGINT_KEYS = new Set([
-  "blockNumber",
-  "prevBorrowRate",
-  "assets",
-  "repaidAssets",
-]);
-function reviveEvent(obj: Record<string, unknown>): TimelineEvent {
-  const out = { ...obj } as Record<string, unknown>;
-  for (const k of BIGINT_KEYS) {
-    if (k in out && (typeof out[k] === "number" || typeof out[k] === "string"))
-      out[k] = BigInt(out[k] as number | string);
-  }
-  return out as TimelineEvent;
-}
-
-/** Highest block_number we have for this market (for incremental sync). */
-export function getLastSyncedBlock(marketId: string): bigint | null {
-  const d = getDb();
-  const row = d
-    .query(
-      `SELECT MAX(block_number) as max_block FROM events WHERE market_id = ?`
-    )
-    .get(marketId.toLowerCase()) as { max_block: number | null } | undefined;
-  if (row?.max_block == null) return null;
-  return BigInt(row.max_block);
-}
-
-/** Close the DB (e.g. on process exit). */
-export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  const stmt = d.prepare(
+    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)`
+  );
+  d.transaction(() => {
+    for (const [blockNumber, timestamp] of entries) {
+      stmt.run(Number(blockNumber), timestamp);
+    }
+  })();
 }

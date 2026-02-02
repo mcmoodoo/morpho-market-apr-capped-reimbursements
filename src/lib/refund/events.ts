@@ -29,11 +29,16 @@ export interface FetchedEvents {
   liquidate: LiquidateEvent[];
 }
 
+export interface FetchAllEventsResult {
+  events: FetchedEvents;
+  blockTimestamps: Map<bigint, number>;
+}
+
 // Infura eth_getLogs constraints (https://docs.metamask.io/services/reference/ethereum/json-rpc-methods/eth_getlogs):
 // - max 10,000 results per query
 // - max 10s query duration
 // - max 5,000 parameters per request
-// Chunk by block range so each request stays under 10k results; 50k blocks (~3.5h on Arbitrum) keeps 24h to ~7 chunks.
+// Chunk by block range so each request stays under 10k results; 50k blocks (~3.5h on Arbitrum) keeps 4h to ~2 chunks.
 const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
 // Delay between eth_getLogs calls to avoid Infura 429 Too Many Requests (rate limit).
@@ -140,7 +145,7 @@ export async function fetchAllEvents(
   startTimestamp: number,
   endTimestamp: number,
   options?: FetchAllEventsOptions
-): Promise<FetchedEvents> {
+): Promise<FetchAllEventsResult> {
   const accrueRaw: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
   const borrowRaw: typeof accrueRaw = [];
   const repayRaw: typeof accrueRaw = [];
@@ -249,39 +254,4 @@ export async function fetchAllEvents(
   }));
 
   return { events: { accrue, borrow, repay, liquidate }, blockTimestamps };
-}
-
-/**
- * Fetch only AccrueInterest events. Chunks the range so each eth_getLogs
- * stays under Infura limit (10k results, 10s timeout).
- */
-export async function fetchAccrueInterestOnly(
-  client: PublicClient,
-  startBlock: bigint,
-  endBlock: bigint,
-  startTimestamp: number,
-  endTimestamp: number
-): Promise<AccrueInterestEvent[]> {
-  const accrueRaw: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
-  for (const [from, to] of chunkBlockRange(startBlock, endBlock)) {
-    const logs = await client.getLogs({
-      address: MORPHO_BLUE,
-      event: ACCRUE_INTEREST_EVENT,
-      args: { id: MARKET_ID },
-      fromBlock: from,
-      toBlock: to,
-    });
-    accrueRaw.push(...logs);
-    await sleep(RPC_DELAY_MS);
-  }
-  const ts = (blockNumber: bigint) =>
-    interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
-  return accrueRaw.map((log) => ({
-    type: "accrue" as const,
-    blockNumber: log.blockNumber,
-    transactionIndex: log.transactionIndex,
-    logIndex: log.logIndex,
-    timestamp: ts(log.blockNumber),
-    prevBorrowRate: log.args.prevBorrowRate!,
-  }));
 }
