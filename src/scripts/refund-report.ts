@@ -1,28 +1,34 @@
 /**
  * Overpayment report: load events for a market, run calculator, print per-borrower refunds.
+ * Always writes JSON to a file; stdout is human table (default) or JSON (--json).
  *
  * Usage:
- *   bun run src/scripts/refund-report.ts [--market <id>] [--from-block N] [--to-block N] [--json]
+ *   bun run src/scripts/refund-report.ts [--market <id>] [--from-block N] [--to-block N] [--output path.json] [--json]
  *
- * Default market: MARKET_ID from config. Block range defaults to all events for that market.
- * Timestamp window: min/max event timestamp in the loaded timeline.
+ * Default market: MARKET_ID from config. Default output file: reports/refund-report.json
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { formatUnits } from "viem";
 import { MARKET_ID, USDC_DECIMALS } from "../lib/refund/config.ts";
 import { getEvents } from "../lib/refund/db.ts";
 import { calculateOverpayments } from "../lib/refund/calculator.ts";
 
+const DEFAULT_OUTPUT_PATH = "reports/refund-report.json";
+
 function parseArgs(): {
   marketId: string;
   fromBlock: bigint | undefined;
   toBlock: bigint | undefined;
+  outputPath: string;
   json: boolean;
 } {
   const args = process.argv.slice(2);
   let marketId = MARKET_ID;
   let fromBlock: bigint | undefined;
   let toBlock: bigint | undefined;
+  let outputPath = DEFAULT_OUTPUT_PATH;
   let json = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -32,12 +38,14 @@ function parseArgs(): {
       fromBlock = BigInt(args[++i]);
     } else if (args[i] === "--to-block" && args[i + 1]) {
       toBlock = BigInt(args[++i]);
+    } else if (args[i] === "--output" && args[i + 1]) {
+      outputPath = args[++i];
     } else if (args[i] === "--json") {
       json = true;
     }
   }
 
-  return { marketId, fromBlock, toBlock, json };
+  return { marketId, fromBlock, toBlock, outputPath, json };
 }
 
 function formatUsdc(amount: bigint): string {
@@ -45,7 +53,7 @@ function formatUsdc(amount: bigint): string {
 }
 
 async function main() {
-  const { marketId, fromBlock, toBlock, json } = parseArgs();
+  const { marketId, fromBlock, toBlock, outputPath, json } = parseArgs();
 
   const timeline = getEvents(marketId, fromBlock, toBlock);
   if (timeline.length === 0) {
@@ -67,22 +75,27 @@ async function main() {
 
   const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
 
+  const report = {
+    marketId,
+    fromBlock: fromBlock?.toString(),
+    toBlock: toBlock?.toString(),
+    startTimestamp,
+    endTimestamp,
+    eventCount: timeline.length,
+    borrowerCount: entries.length,
+    totalOverpayment: formatUsdc(totalOverpayment),
+    borrowers: entries.map(([address, amount]) => ({
+      address,
+      overpayment: formatUsdc(amount),
+    })),
+  };
+
+  const reportJson = JSON.stringify(report, null, 2);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  await Bun.write(outputPath, reportJson);
+
   if (json) {
-    const report = {
-      marketId,
-      fromBlock: fromBlock?.toString(),
-      toBlock: toBlock?.toString(),
-      startTimestamp,
-      endTimestamp,
-      eventCount: timeline.length,
-      borrowerCount: entries.length,
-      totalOverpayment: formatUsdc(totalOverpayment),
-      borrowers: entries.map(([address, amount]) => ({
-        address,
-        overpayment: formatUsdc(amount),
-      })),
-    };
-    console.log(JSON.stringify(report, null, 2));
+    console.log(reportJson);
     return;
   }
 
@@ -95,6 +108,7 @@ async function main() {
   console.log("Events:", timeline.length);
   console.log("Borrowers with overpayment:", entries.length);
   console.log("Total overpayment (USDC):", formatUsdc(totalOverpayment));
+  console.log("Report saved:", outputPath);
   console.log("");
 
   if (entries.length === 0) {
