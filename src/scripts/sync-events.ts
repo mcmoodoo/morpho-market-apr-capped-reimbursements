@@ -5,7 +5,6 @@
 
 import { createPublicClient, http } from "viem";
 import { arbitrum } from "viem/chains";
-import { MARKET_ID } from "../lib/refund/config.ts";
 import { fetchAllEvents } from "../lib/refund/events.ts";
 import { clearDb, insertBlockTimestamps, insertEvents } from "../lib/refund/db.ts";
 import type { TimelineEvent } from "../lib/refund/types.ts";
@@ -72,7 +71,7 @@ async function main() {
   );
 
   console.log("Save to DB");
-  insertEvents(MARKET_ID, timeline);
+  insertEvents(timeline);
   insertBlockTimestamps(blockTimestamps);
   console.log(`  ${timeline.length} events, ${blockTimestamps.size} block timestamps`);
   console.log("Done.");

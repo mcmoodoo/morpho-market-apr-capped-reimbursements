@@ -1,6 +1,6 @@
 import type { PublicClient } from "viem";
 import { parseAbiItem } from "viem";
-import { MORPHO_BLUE, MARKET_ID } from "./config.ts";
+import { MORPHO_BLUE } from "./config.ts";
 import type {
   AccrueInterestEvent,
   BorrowEvent,
@@ -155,7 +155,6 @@ export async function fetchAllEvents(
     const a = await client.getLogs({
       address: MORPHO_BLUE,
       event: ACCRUE_INTEREST_EVENT,
-      args: { id: MARKET_ID },
       fromBlock: from,
       toBlock: to,
     });
@@ -163,7 +162,6 @@ export async function fetchAllEvents(
     const b = await client.getLogs({
       address: MORPHO_BLUE,
       event: BORROW_EVENT,
-      args: { id: MARKET_ID },
       fromBlock: from,
       toBlock: to,
     });
@@ -171,7 +169,6 @@ export async function fetchAllEvents(
     const r = await client.getLogs({
       address: MORPHO_BLUE,
       event: REPAY_EVENT,
-      args: { id: MARKET_ID },
       fromBlock: from,
       toBlock: to,
     });
@@ -179,7 +176,6 @@ export async function fetchAllEvents(
     const l = await client.getLogs({
       address: MORPHO_BLUE,
       event: LIQUIDATE_EVENT,
-      args: { id: MARKET_ID },
       fromBlock: from,
       toBlock: to,
     });
@@ -214,20 +210,27 @@ export async function fetchAllEvents(
       interpolateTimestamp(blockNumber, startBlock, endBlock, startTimestamp, endTimestamp);
   }
 
+  const marketIdStr = (id: unknown): string =>
+    typeof id === "string" ? id.toLowerCase() : String(id).toLowerCase();
+
   const accrue: AccrueInterestEvent[] = accrueRaw.map((log) => ({
     type: "accrue" as const,
+    marketId: marketIdStr(log.args.id),
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
+    transactionHash: log.transactionHash!,
     timestamp: ts(log.blockNumber),
     prevBorrowRate: log.args.prevBorrowRate!,
   }));
 
   const borrow: BorrowEvent[] = borrowRaw.map((log) => ({
     type: "borrow" as const,
+    marketId: marketIdStr(log.args.id),
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
+    transactionHash: log.transactionHash!,
     timestamp: ts(log.blockNumber),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
@@ -235,9 +238,11 @@ export async function fetchAllEvents(
 
   const repay: RepayEvent[] = repayRaw.map((log) => ({
     type: "repay" as const,
+    marketId: marketIdStr(log.args.id),
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
+    transactionHash: log.transactionHash!,
     timestamp: ts(log.blockNumber),
     borrower: log.args.onBehalf!,
     assets: log.args.assets!,
@@ -245,9 +250,11 @@ export async function fetchAllEvents(
 
   const liquidate: LiquidateEvent[] = liquidateRaw.map((log) => ({
     type: "liquidate" as const,
+    marketId: marketIdStr(log.args.id),
     blockNumber: log.blockNumber,
     transactionIndex: log.transactionIndex,
     logIndex: log.logIndex,
+    transactionHash: log.transactionHash!,
     timestamp: ts(log.blockNumber),
     borrower: log.args.borrower!,
     repaidAssets: log.args.repaidAssets!,

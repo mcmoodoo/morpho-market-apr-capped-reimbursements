@@ -21,13 +21,22 @@ function getDb(): Database {
         block_number INTEGER NOT NULL,
         tx_index INTEGER NOT NULL,
         log_index INTEGER NOT NULL,
+        transaction_hash TEXT,
         event_type TEXT NOT NULL,
         payload TEXT NOT NULL,
         PRIMARY KEY (market_id, block_number, tx_index, log_index)
       )
     `);
+    try {
+      db.run("ALTER TABLE events ADD COLUMN transaction_hash TEXT");
+    } catch {
+      /* column may already exist */
+    }
     db.run(
       `CREATE INDEX IF NOT EXISTS idx_events_market_block ON events (market_id, block_number)`
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_events_tx_hash ON events (transaction_hash)`
     );
     db.run(`
       CREATE TABLE IF NOT EXISTS block_timestamps (
@@ -52,20 +61,20 @@ function eventToPayload(event: TimelineEvent): string {
   );
 }
 
-export function insertEvents(marketId: string, events: TimelineEvent[]): void {
+export function insertEvents(events: TimelineEvent[]): void {
   const d = getDb();
   const stmt = d.prepare(
-    `INSERT OR REPLACE INTO events (market_id, block_number, tx_index, log_index, event_type, payload)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR REPLACE INTO events (market_id, block_number, tx_index, log_index, transaction_hash, event_type, payload)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
-  const market = marketId.toLowerCase();
   d.transaction(() => {
     for (const event of events) {
       stmt.run(
-        market,
+        event.marketId.toLowerCase(),
         Number(event.blockNumber),
         event.transactionIndex,
         event.logIndex,
+        event.transactionHash,
         event.type,
         eventToPayload(event)
       );
@@ -85,4 +94,47 @@ export function insertBlockTimestamps(
       stmt.run(Number(blockNumber), timestamp);
     }
   })();
+}
+
+const BIGINT_KEYS = new Set([
+  "blockNumber",
+  "prevBorrowRate",
+  "assets",
+  "repaidAssets",
+]);
+
+function reviveEvent(obj: Record<string, unknown>): TimelineEvent {
+  const out = { ...obj } as Record<string, unknown>;
+  for (const k of BIGINT_KEYS) {
+    if (k in out && (typeof out[k] === "number" || typeof out[k] === "string")) {
+      out[k] = BigInt(out[k] as number | string);
+    }
+  }
+  return out as TimelineEvent;
+}
+
+/**
+ * Read events for a market in timeline order (block_number, tx_index, log_index).
+ * Optional block range filter. Each event's payload includes timestamp from sync.
+ */
+export function getEvents(
+  marketId: string,
+  fromBlock?: bigint,
+  toBlock?: bigint
+): TimelineEvent[] {
+  const d = getDb();
+  let sql = `SELECT payload FROM events WHERE market_id = ?`;
+  const args: (string | number)[] = [marketId.toLowerCase()];
+  if (fromBlock !== undefined) {
+    sql += ` AND block_number >= ?`;
+    args.push(Number(fromBlock));
+  }
+  if (toBlock !== undefined) {
+    sql += ` AND block_number <= ?`;
+    args.push(Number(toBlock));
+  }
+  sql += ` ORDER BY block_number, tx_index, log_index`;
+
+  const rows = d.query(sql).all(...args) as { payload: string }[];
+  return rows.map((r) => reviveEvent(JSON.parse(r.payload) as Record<string, unknown>));
 }

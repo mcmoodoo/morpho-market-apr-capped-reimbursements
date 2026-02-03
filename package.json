@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "sync": "bun run src/scripts/sync-events.ts",
+    "report": "bun run src/scripts/refund-report.ts",
     "view-db": "nohup sqlitebrowser data/events.db & disown"
   },
   "devDependencies": {
