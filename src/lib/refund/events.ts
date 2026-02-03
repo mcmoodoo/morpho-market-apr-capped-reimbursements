@@ -42,7 +42,7 @@ export interface FetchAllEventsResult {
 const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
 // Delay between eth_getLogs calls to avoid Infura 429 Too Many Requests (rate limit).
-const RPC_DELAY_MS = 400;
+const RPC_DELAY_MS = 1000;
 
 // Max batch size for eth_getBlockByNumber batch (Infura may limit request size).
 const BLOCK_TIMESTAMPS_BATCH_SIZE = 500;
@@ -96,10 +96,14 @@ export async function getBlockTimestamps(
   return map;
 }
 
-function* chunkBlockRange(startBlock: bigint, endBlock: bigint): Generator<[bigint, bigint]> {
+function* chunkBlockRange(
+  startBlock: bigint,
+  endBlock: bigint,
+  chunkSize: bigint = MAX_BLOCKS_PER_GETLOGS
+): Generator<[bigint, bigint]> {
   let from = startBlock;
   while (from <= endBlock) {
-    const to = from + MAX_BLOCKS_PER_GETLOGS - 1n > endBlock ? endBlock : from + MAX_BLOCKS_PER_GETLOGS - 1n;
+    const to = from + chunkSize - 1n > endBlock ? endBlock : from + chunkSize - 1n;
     yield [from, to];
     from = to + 1n;
   }
@@ -131,6 +135,8 @@ export interface FetchAllEventsOptions {
    * When false (default), throw if any block timestamp is missing.
    */
   fallbackToInterpolation?: boolean;
+  /** Max blocks per eth_getLogs chunk (default 50_000). Use smaller (e.g. 10_000) to reduce rate-limit risk. */
+  maxBlocksPerChunk?: bigint;
 }
 
 /**
@@ -151,7 +157,8 @@ export async function fetchAllEvents(
   const repayRaw: typeof accrueRaw = [];
   const liquidateRaw: typeof accrueRaw = [];
 
-  for (const [from, to] of chunkBlockRange(startBlock, endBlock)) {
+  const chunkSize = options?.maxBlocksPerChunk ?? MAX_BLOCKS_PER_GETLOGS;
+  for (const [from, to] of chunkBlockRange(startBlock, endBlock, chunkSize)) {
     const a = await client.getLogs({
       address: MORPHO_BLUE,
       event: ACCRUE_INTEREST_EVENT,

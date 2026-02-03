@@ -48,6 +48,16 @@ function getDb(): Database {
   return db;
 }
 
+/** Max block_number in events table (any market), or null if empty. */
+export function getMaxBlockInEvents(): bigint | null {
+  const d = getDb();
+  const row = d.query(`SELECT MAX(block_number) AS max_block FROM events`).get() as
+    | { max_block: number | null }
+    | undefined;
+  if (row?.max_block == null) return null;
+  return BigInt(row.max_block);
+}
+
 /** Clear all events and block_timestamps. Call before each sync. */
 export function clearDb(): void {
   const d = getDb();
