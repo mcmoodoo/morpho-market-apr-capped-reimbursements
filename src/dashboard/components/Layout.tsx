@@ -1,15 +1,40 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { startOfDay, endOfDay } from "date-fns";
 import { useDashboardStore } from "../store";
+import type { TimeRangePreset } from "../store";
 import { useConfig } from "../hooks/useApi";
+import { DateRangeCalendar } from "./DateRangeCalendar";
 
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { timeRangePreset, setTimeRangePreset } = useDashboardStore();
+  const { timeRangePreset, fromTimestamp, toTimestamp, setTimeRangePreset, setCustomTimeRange } = useDashboardStore();
   const [borrowerInput, setBorrowerInput] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState<Date | null>(null);
+  const [customTo, setCustomTo] = useState<Date | null>(null);
   const { data: config } = useConfig();
+
+  const handleOpenCustom = (open: boolean) => {
+    setCustomOpen(open);
+    if (open) {
+      setCustomFrom(fromTimestamp != null ? new Date(fromTimestamp * 1000) : null);
+      setCustomTo(toTimestamp != null ? new Date(toTimestamp * 1000) : null);
+    }
+  };
+
+  const handleApplyCustom = () => {
+    if (customFrom == null || customTo == null) return;
+    const from = Math.floor(startOfDay(customFrom).getTime() / 1000);
+    const to = Math.floor(endOfDay(customTo).getTime() / 1000);
+    if (from <= to) {
+      setCustomTimeRange(from, to);
+      setCustomOpen(false);
+    }
+  };
 
   const handleBorrowerLookup = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +74,7 @@ export function Layout() {
               >
                 Markets
               </Link>
-              <Tabs.Root value={timeRangePreset} onValueChange={(v) => setTimeRangePreset(v as "7d" | "30d" | "90d" | "all")}>
+              <Tabs.Root value={timeRangePreset} onValueChange={(v) => setTimeRangePreset(v as TimeRangePreset)}>
                 <Tabs.List className="flex gap-1 rounded-md bg-gray-800 p-1">
                   {(["7d", "30d", "90d", "all"] as const).map((preset) => (
                     <Tabs.Trigger
@@ -60,6 +85,38 @@ export function Layout() {
                       {preset === "all" ? "All time" : preset}
                     </Tabs.Trigger>
                   ))}
+                  <DropdownMenu.Root open={customOpen} onOpenChange={handleOpenCustom}>
+                    <DropdownMenu.Trigger asChild>
+                      <Tabs.Trigger
+                        value="custom"
+                        className="rounded px-3 py-1.5 text-xs font-medium data-[state=active]:bg-gray-700 data-[state=inactive]:text-gray-400 hover:text-white"
+                      >
+                        Custom
+                      </Tabs.Trigger>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content
+                        className="rounded-lg bg-gray-800 p-3 shadow-lg border border-gray-700"
+                        sideOffset={6}
+                        align="end"
+                      >
+                        <DateRangeCalendar
+                          from={customFrom}
+                          to={customTo}
+                          onFromChange={setCustomFrom}
+                          onToChange={setCustomTo}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleApplyCustom}
+                          disabled={customFrom == null || customTo == null || customFrom > customTo}
+                          className="mt-3 w-full px-3 py-1.5 rounded text-xs font-medium bg-gray-700 text-white hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Apply
+                        </button>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                 </Tabs.List>
               </Tabs.Root>
             </nav>

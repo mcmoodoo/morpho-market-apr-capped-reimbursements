@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TimeRangePreset = "7d" | "30d" | "90d" | "all";
+export type TimeRangePreset = "7d" | "30d" | "90d" | "all" | "custom";
 
 export interface DashboardState {
   selectedMarketId: string | null;
@@ -29,6 +29,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setSelectedBorrowerAddress: (address) => set({ selectedBorrowerAddress: address }),
 
   setTimeRangePreset: (preset) => {
+    if (preset === "custom") {
+      set({ timeRangePreset: "custom" });
+      return;
+    }
     const now = Math.floor(Date.now() / 1000);
     const day = 86400;
     let from: number | null = null;
@@ -40,11 +44,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   setCustomTimeRange: (from, to) =>
-    set({ fromTimestamp: from, toTimestamp: to, timeRangePreset: "all" }),
+    set({ fromTimestamp: from, toTimestamp: to, timeRangePreset: "custom" }),
 
   getTimeRange: () => {
     const { timeRangePreset, fromTimestamp, toTimestamp } = get();
-    if (timeRangePreset !== "all" || fromTimestamp != null || toTimestamp != null) {
+    if (timeRangePreset === "custom" || fromTimestamp != null || toTimestamp != null) {
+      return { from: fromTimestamp, to: toTimestamp };
+    }
+    if (timeRangePreset !== "all") {
       return { from: fromTimestamp, to: toTimestamp };
     }
     return { from: null, to: null };
