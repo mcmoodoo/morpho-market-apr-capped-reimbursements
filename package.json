@@ -6,6 +6,7 @@
   "scripts": {
     "sync": "bun run src/scripts/sync-events.ts",
     "api": "bun run src/api/index.ts",
+    "test": "bun test src/lib/refund/calculator.test.ts",
     "build:dashboard": "bun run src/dashboard/build.ts"
   },
   "devDependencies": {
