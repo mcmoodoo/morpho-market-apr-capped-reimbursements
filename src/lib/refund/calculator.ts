@@ -68,23 +68,26 @@ export function calculateOverpayments(
         break;
       case "borrow": {
         const e = event as BorrowEvent;
-        const debt = borrowerDebts.get(e.borrower) ?? 0n;
-        borrowerDebts.set(e.borrower, debt + e.assets);
+        const borrower = e.borrower.toLowerCase();
+        const debt = borrowerDebts.get(borrower) ?? 0n;
+        borrowerDebts.set(borrower, debt + e.assets);
         break;
       }
       case "repay": {
         const e = event as RepayEvent;
-        const debtBefore = borrowerDebts.get(e.borrower) ?? 0n;
+        const borrower = e.borrower.toLowerCase();
+        const debtBefore = borrowerDebts.get(borrower) ?? 0n;
         const newDebt = debtBefore > e.assets ? debtBefore - e.assets : 0n;
-        borrowerDebts.set(e.borrower, newDebt);
+        borrowerDebts.set(borrower, newDebt);
         break;
       }
       case "liquidate": {
         const e = event as LiquidateEvent;
-        const debtBefore = borrowerDebts.get(e.borrower) ?? 0n;
+        const borrower = e.borrower.toLowerCase();
+        const debtBefore = borrowerDebts.get(borrower) ?? 0n;
         const newDebt =
           debtBefore > e.repaidAssets ? debtBefore - e.repaidAssets : 0n;
-        borrowerDebts.set(e.borrower, newDebt);
+        borrowerDebts.set(borrower, newDebt);
         break;
       }
     }

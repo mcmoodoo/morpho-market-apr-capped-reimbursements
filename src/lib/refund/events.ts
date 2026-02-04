@@ -243,7 +243,7 @@ export async function fetchAllEvents(
       logIndex: log.logIndex,
       transactionHash: log.transactionHash!,
       timestamp: ts(log.blockNumber),
-      borrower: log.args.onBehalf!,
+      borrower: log.args.onBehalf!.toLowerCase(),
       // Convert from WAD (18 decimals) to USDC (6 decimals)
       assets: assetsBigInt / WAD_TO_USDC,
     };
@@ -261,7 +261,7 @@ export async function fetchAllEvents(
       logIndex: log.logIndex,
       transactionHash: log.transactionHash!,
       timestamp: ts(log.blockNumber),
-      borrower: log.args.onBehalf!,
+      borrower: log.args.onBehalf!.toLowerCase(),
       // Convert from WAD (18 decimals) to USDC (6 decimals)
       assets: assetsBigInt / WAD_TO_USDC,
     };
@@ -283,7 +283,7 @@ export async function fetchAllEvents(
         logIndex: log.logIndex,
         transactionHash: log.transactionHash!,
         timestamp: ts(log.blockNumber),
-        borrower: log.args.borrower!,
+        borrower: log.args.borrower!.toLowerCase(),
         // Convert from WAD (18 decimals) to USDC (6 decimals)
         repaidAssets: repaidAssetsBigInt / WAD_TO_USDC,
       };
