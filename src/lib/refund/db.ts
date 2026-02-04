@@ -44,8 +44,94 @@ function getDb(): Database {
         timestamp INTEGER NOT NULL
       )
     `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        market_id TEXT NOT NULL,
+        from_block INTEGER,
+        to_block INTEGER,
+        start_timestamp INTEGER NOT NULL,
+        end_timestamp INTEGER NOT NULL,
+        event_count INTEGER NOT NULL,
+        borrower_count INTEGER NOT NULL,
+        total_overpayment INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_reports_market_created ON reports (market_id, created_at)`);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS report_overpayments (
+        report_id INTEGER NOT NULL,
+        borrower_address TEXT NOT NULL,
+        overpayment INTEGER NOT NULL,
+        PRIMARY KEY (report_id, borrower_address),
+        FOREIGN KEY (report_id) REFERENCES reports (id)
+      )
+    `);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_report_overpayments_report ON report_overpayments (report_id)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_report_overpayments_borrower ON report_overpayments (borrower_address)`);
   }
   return db;
+}
+
+/** Overpayment amounts stored in micro-USDC (1e6 = 1 USDC). */
+export const OVERPAYMENT_DECIMALS = 6;
+
+export interface ReportRow {
+  marketId: string;
+  fromBlock: number | null;
+  toBlock: number | null;
+  startTimestamp: number;
+  endTimestamp: number;
+  eventCount: number;
+  borrowerCount: number;
+  totalOverpayment: bigint;
+}
+
+/**
+ * Insert a report row; returns the new report id.
+ * totalOverpayment in asset units (e.g. 6 decimals for USDC); stored as integer (micro-USDC).
+ */
+export function insertReport(row: ReportRow): number {
+  const d = getDb();
+  const stmt = d.prepare(`
+    INSERT INTO reports (market_id, from_block, to_block, start_timestamp, end_timestamp, event_count, borrower_count, total_overpayment, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const createdAt = Math.floor(Date.now() / 1000);
+  stmt.run(
+    row.marketId.toLowerCase(),
+    row.fromBlock ?? null,
+    row.toBlock ?? null,
+    row.startTimestamp,
+    row.endTimestamp,
+    row.eventCount,
+    row.borrowerCount,
+    Number(row.totalOverpayment),
+    createdAt
+  );
+  const idRow = d.query(`SELECT last_insert_rowid() AS id`).get() as { id: number };
+  return idRow.id;
+}
+
+/**
+ * Insert overpayment rows for a report. Amounts in asset units (e.g. micro-USDC); stored as integer.
+ */
+export function insertReportOverpayments(
+  reportId: number,
+  entries: Array<{ address: string; overpayment: bigint }>
+): void {
+  if (entries.length === 0) return;
+  const d = getDb();
+  const stmt = d.prepare(`
+    INSERT INTO report_overpayments (report_id, borrower_address, overpayment)
+    VALUES (?, ?, ?)
+  `);
+  d.transaction(() => {
+    for (const { address, overpayment } of entries) {
+      stmt.run(reportId, address.toLowerCase(), Number(overpayment));
+    }
+  })();
 }
 
 /** Max block_number in events table (any market), or null if empty. */

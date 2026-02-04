@@ -12,7 +12,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { formatUnits } from "viem";
 import { MARKET_ID, USDC_DECIMALS } from "../lib/refund/config.ts";
-import { getEvents } from "../lib/refund/db.ts";
+import { getEvents, insertReport, insertReportOverpayments } from "../lib/refund/db.ts";
 import { calculateOverpayments } from "../lib/refund/calculator.ts";
 
 const DEFAULT_OUTPUT_PATH = "reports/refund-report.json";
@@ -75,7 +75,23 @@ async function main() {
 
   const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
 
+  const reportId = insertReport({
+    marketId,
+    fromBlock: fromBlock !== undefined ? Number(fromBlock) : null,
+    toBlock: toBlock !== undefined ? Number(toBlock) : null,
+    startTimestamp,
+    endTimestamp,
+    eventCount: timeline.length,
+    borrowerCount: entries.length,
+    totalOverpayment,
+  });
+  insertReportOverpayments(
+    reportId,
+    entries.map(([address, amount]) => ({ address, overpayment: amount }))
+  );
+
   const report = {
+    reportId,
     marketId,
     fromBlock: fromBlock?.toString(),
     toBlock: toBlock?.toString(),
@@ -108,6 +124,7 @@ async function main() {
   console.log("Events:", timeline.length);
   console.log("Borrowers with overpayment:", entries.length);
   console.log("Total overpayment (USDC):", formatUsdc(totalOverpayment));
+  console.log("Report saved to DB (id =", reportId + ")");
   console.log("Report saved:", outputPath);
   console.log("");
 
