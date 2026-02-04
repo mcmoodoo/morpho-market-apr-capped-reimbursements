@@ -1,29 +1,19 @@
 /**
- * Dashboard API: read-only JSON API for reports and overpayments.
+ * Dashboard API: read-only JSON API. Overpayments computed on-demand from events.
  * Serves dashboard at GET / (and /dashboard/* assets).
  *
  * Endpoints:
  *   GET /health
  *   GET /markets
- *   GET /reports/latest?marketId=0x...
- *   GET /reports/:id
- *   GET /reports/:id/overpayments
+ *   GET /markets/:marketId/overpayments
  *   GET /borrowers/:address/overpayments
  *
  * Amounts are returned in micro-USDC (string) — divide by 1e6 for USDC.
  */
 
 import { join } from "node:path";
-import {
-  getReportById,
-  getLatestReportForMarket,
-  getOverpaymentsForReport,
-  getOverpaymentsByBorrower,
-  getMarkets,
-  type Report,
-  type ReportOverpaymentRow,
-  type BorrowerOverpaymentRow,
-} from "../lib/refund/db.ts";
+import { getEvents, getMarkets } from "../lib/refund/db.ts";
+import { calculateOverpayments } from "../lib/refund/calculator.ts";
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 const DASHBOARD_DIR = join(import.meta.dir, "../dashboard");
@@ -44,37 +34,6 @@ function errorResponse(message: string, status: number): Response {
   return jsonResponse({ error: message }, status);
 }
 
-function reportToJson(r: Report): Record<string, unknown> {
-  return {
-    id: r.id,
-    marketId: r.marketId,
-    fromBlock: r.fromBlock,
-    toBlock: r.toBlock,
-    startTimestamp: r.startTimestamp,
-    endTimestamp: r.endTimestamp,
-    eventCount: r.eventCount,
-    borrowerCount: r.borrowerCount,
-    totalOverpayment: r.totalOverpayment.toString(),
-    createdAt: r.createdAt,
-  };
-}
-
-function overpaymentToJson(row: ReportOverpaymentRow): Record<string, unknown> {
-  return {
-    borrowerAddress: row.borrowerAddress,
-    overpayment: row.overpayment.toString(),
-  };
-}
-
-function borrowerOverpaymentToJson(row: BorrowerOverpaymentRow): Record<string, unknown> {
-  return {
-    reportId: row.reportId,
-    marketId: row.marketId,
-    createdAt: row.createdAt,
-    overpayment: row.overpayment.toString(),
-  };
-}
-
 function handleGet(pathSegments: string[], searchParams: URLSearchParams): Response {
   // GET /health
   if (pathSegments.length === 1 && pathSegments[0] === "health") {
@@ -87,38 +46,31 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     return jsonResponse({ markets });
   }
 
-  // GET /reports/latest?marketId=...
-  if (pathSegments.length === 2 && pathSegments[0] === "reports" && pathSegments[1] === "latest") {
-    const marketId = searchParams.get("marketId");
-    if (!marketId || !marketId.trim()) {
-      return errorResponse("Missing query parameter: marketId", 400);
-    }
-    const report = getLatestReportForMarket(marketId.trim());
-    if (!report) return errorResponse("No report found for this market", 404);
-    return jsonResponse(reportToJson(report));
-  }
-
-  // GET /reports/:id
-  if (pathSegments.length === 2 && pathSegments[0] === "reports") {
-    const id = Number(pathSegments[1]);
-    if (!Number.isInteger(id) || id < 1) {
-      return errorResponse("Invalid report id", 400);
-    }
-    const report = getReportById(id);
-    if (!report) return errorResponse("Report not found", 404);
-    return jsonResponse(reportToJson(report));
-  }
-
-  // GET /reports/:id/overpayments
-  if (pathSegments.length === 3 && pathSegments[0] === "reports" && pathSegments[2] === "overpayments") {
-    const id = Number(pathSegments[1]);
-    if (!Number.isInteger(id) || id < 1) {
-      return errorResponse("Invalid report id", 400);
-    }
-    const report = getReportById(id);
-    if (!report) return errorResponse("Report not found", 404);
-    const rows = getOverpaymentsForReport(id);
-    return jsonResponse({ reportId: id, overpayments: rows.map(overpaymentToJson) });
+  // GET /markets/:marketId/overpayments
+  if (pathSegments.length === 3 && pathSegments[0] === "markets" && pathSegments[2] === "overpayments") {
+    const marketId = pathSegments[1];
+    if (!marketId) return errorResponse("Missing market id", 400);
+    const timeline = getEvents(marketId.trim());
+    if (timeline.length === 0) return errorResponse("No events found for this market", 404);
+    const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
+    const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
+    const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
+    const entries = [...overpayments.entries()]
+      .filter(([, amount]) => amount > 0n)
+      .sort((a, b) => (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0));
+    const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
+    return jsonResponse({
+      marketId: marketId.trim().toLowerCase(),
+      startTimestamp,
+      endTimestamp,
+      eventCount: timeline.length,
+      borrowerCount: entries.length,
+      totalOverpayment: totalOverpayment.toString(),
+      borrowers: entries.map(([address, amount]) => ({
+        borrowerAddress: address,
+        overpayment: amount.toString(),
+      })),
+    });
   }
 
   // GET /borrowers/:address/overpayments
@@ -127,8 +79,21 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     if (!address || !address.startsWith("0x") || address.length < 10) {
       return errorResponse("Invalid borrower address", 400);
     }
-    const rows = getOverpaymentsByBorrower(address);
-    return jsonResponse({ borrowerAddress: address, overpayments: rows.map(borrowerOverpaymentToJson) });
+    const normalized = address.trim().toLowerCase();
+    const markets = getMarkets();
+    const overpayments: Array<{ marketId: string; overpayment: string }> = [];
+    for (const marketId of markets) {
+      const timeline = getEvents(marketId);
+      if (timeline.length === 0) continue;
+      const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
+      const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
+      const map = calculateOverpayments(timeline, startTimestamp, endTimestamp);
+      const amount = map.get(normalized);
+      if (amount != null && amount > 0n) {
+        overpayments.push({ marketId, overpayment: amount.toString() });
+      }
+    }
+    return jsonResponse({ borrowerAddress: address, overpayments });
   }
 
   return errorResponse("Not found", 404);

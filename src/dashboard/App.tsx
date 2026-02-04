@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import {
-  getLatestReport,
-  getOverpaymentsForReport,
+  getMarketOverpayments,
   getMarkets,
-  type ReportJson,
+  type MarketOverpaymentsJson,
   type OverpaymentJson,
 } from "./api";
 import { ReportSummary } from "./ReportSummary";
@@ -18,13 +17,10 @@ function getMarketFromUrl(): string | null {
 export function App() {
   const [markets, setMarkets] = useState<string[]>([]);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
-  const [report, setReport] = useState<ReportJson | null>(null);
-  const [overpayments, setOverpayments] = useState<OverpaymentJson[]>([]);
+  const [marketData, setMarketData] = useState<MarketOverpaymentsJson | null>(null);
   const [loadingMarkets, setLoadingMarkets] = useState(true);
-  const [loadingReport, setLoadingReport] = useState(true);
   const [loadingOverpayments, setLoadingOverpayments] = useState(true);
   const [errorMarkets, setErrorMarkets] = useState<string | null>(null);
-  const [errorReport, setErrorReport] = useState<string | null>(null);
   const [errorOverpayments, setErrorOverpayments] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,42 +52,16 @@ export function App() {
 
   useEffect(() => {
     if (!selectedMarket) {
-      setReport(null);
-      setLoadingReport(false);
-      return;
-    }
-    let cancelled = false;
-    setLoadingReport(true);
-    setErrorReport(null);
-    getLatestReport(selectedMarket)
-      .then((r) => {
-        if (!cancelled) {
-          setReport(r);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setErrorReport(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingReport(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedMarket]);
-
-  useEffect(() => {
-    if (!report) {
-      setOverpayments([]);
+      setMarketData(null);
       setLoadingOverpayments(false);
       return;
     }
     let cancelled = false;
     setLoadingOverpayments(true);
     setErrorOverpayments(null);
-    getOverpaymentsForReport(report.id)
-      .then((list) => {
-        if (!cancelled) setOverpayments(list);
+    getMarketOverpayments(selectedMarket)
+      .then((data) => {
+        if (!cancelled) setMarketData(data);
       })
       .catch((err) => {
         if (!cancelled) setErrorOverpayments(err instanceof Error ? err.message : String(err));
@@ -102,7 +72,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [report?.id]);
+  }, [selectedMarket]);
 
   function handleMarketChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const market = e.target.value;
@@ -111,6 +81,8 @@ export function App() {
     url.searchParams.set("market", market);
     window.history.pushState({}, "", url);
   }
+
+  const overpayments: OverpaymentJson[] = marketData?.borrowers ?? [];
 
   return (
     <div className="app">
@@ -152,7 +124,7 @@ export function App() {
                 ))}
               </select>
             </section>
-            <ReportSummary report={report} loading={loadingReport} error={errorReport} />
+            <ReportSummary marketData={marketData} loading={loadingOverpayments} error={errorOverpayments} />
             <OverpaymentsTable
               overpayments={overpayments}
               loading={loadingOverpayments}

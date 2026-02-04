@@ -15,7 +15,7 @@ function shortAddress(addr: string): string {
 export function OverpaymentsTable({ overpayments, loading, error }: Props) {
   if (loading) return <section className="card"><p>Loading overpayments…</p></section>;
   if (error) return <section className="card card--error"><p>{error}</p></section>;
-  if (overpayments.length === 0) return <section className="card"><p>No overpayments in this report.</p></section>;
+  if (overpayments.length === 0) return <section className="card"><p>No overpayments for this market.</p></section>;
 
   return (
     <section className="card">

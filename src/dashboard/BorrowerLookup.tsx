@@ -49,18 +49,14 @@ export function BorrowerLookup() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Report id</th>
                   <th>Market</th>
-                  <th>Created at</th>
                   <th className="num">Overpayment (USDC)</th>
                 </tr>
               </thead>
               <tbody>
                 {result.map((row, i) => (
-                  <tr key={`${row.reportId}-${i}`}>
-                    <td>{row.reportId}</td>
+                  <tr key={`${row.marketId}-${i}`}>
                     <td title={row.marketId}>{row.marketId.slice(0, 10)}…</td>
-                    <td>{new Date(row.createdAt * 1000).toISOString()}</td>
                     <td className="num">{microUsdcToUsdc(row.overpayment)}</td>
                   </tr>
                 ))}

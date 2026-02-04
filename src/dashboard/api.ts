@@ -2,17 +2,14 @@
 
 const BASE = "";
 
-export interface ReportJson {
-  id: number;
+export interface MarketOverpaymentsJson {
   marketId: string;
-  fromBlock: number | null;
-  toBlock: number | null;
   startTimestamp: number;
   endTimestamp: number;
   eventCount: number;
   borrowerCount: number;
   totalOverpayment: string;
-  createdAt: number;
+  borrowers: Array<{ borrowerAddress: string; overpayment: string }>;
 }
 
 export interface OverpaymentJson {
@@ -21,9 +18,7 @@ export interface OverpaymentJson {
 }
 
 export interface BorrowerOverpaymentJson {
-  reportId: number;
   marketId: string;
-  createdAt: number;
   overpayment: string;
 }
 
@@ -37,18 +32,11 @@ async function apiError(res: Response): Promise<Error> {
   }
 }
 
-export async function getLatestReport(marketId: string): Promise<ReportJson | null> {
-  const res = await fetch(`${BASE}/reports/latest?marketId=${encodeURIComponent(marketId)}`);
+export async function getMarketOverpayments(marketId: string): Promise<MarketOverpaymentsJson | null> {
+  const res = await fetch(`${BASE}/markets/${encodeURIComponent(marketId)}/overpayments`);
   if (res.status === 404) return null;
   if (!res.ok) throw await apiError(res);
   return res.json();
-}
-
-export async function getOverpaymentsForReport(reportId: number): Promise<OverpaymentJson[]> {
-  const res = await fetch(`${BASE}/reports/${reportId}/overpayments`);
-  if (!res.ok) throw await apiError(res);
-  const data = await res.json();
-  return data.overpayments ?? [];
 }
 
 export async function getOverpaymentsByBorrower(address: string): Promise<BorrowerOverpaymentJson[]> {
