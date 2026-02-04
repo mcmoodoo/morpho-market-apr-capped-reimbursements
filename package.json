@@ -6,6 +6,7 @@
   "scripts": {
     "sync": "bun run src/scripts/sync-events.ts",
     "report": "bun run src/scripts/refund-report.ts",
+    "backfill:events-flat": "bun run src/scripts/backfill-events-flat.ts",
     "api": "bun run src/api/index.ts",
     "build:dashboard": "bun run src/dashboard/build.ts",
     "view-db": "nohup sqlitebrowser data/events.db & disown"

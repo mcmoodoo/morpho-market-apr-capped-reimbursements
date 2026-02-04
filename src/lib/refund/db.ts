@@ -17,16 +17,16 @@ function getDb(): Database {
     db = new Database(DB_PATH, { create: true });
     db.run(`
       CREATE TABLE IF NOT EXISTS events (
-        market_id TEXT NOT NULL,
-        block_number INTEGER NOT NULL,
-        tx_index INTEGER NOT NULL,
-        log_index INTEGER NOT NULL,
-        transaction_hash TEXT,
-        event_type TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        PRIMARY KEY (market_id, block_number, tx_index, log_index)
-      )
-    `);
+          market_id TEXT NOT NULL,
+          block_number INTEGER NOT NULL,
+          tx_index INTEGER NOT NULL,
+          log_index INTEGER NOT NULL,
+          transaction_hash TEXT,
+          event_type TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          PRIMARY KEY (market_id, block_number, tx_index, log_index)
+        )
+      `);
     try {
       db.run("ALTER TABLE events ADD COLUMN transaction_hash TEXT");
     } catch {
@@ -37,6 +37,31 @@ function getDb(): Database {
     );
     db.run(
       `CREATE INDEX IF NOT EXISTS idx_events_tx_hash ON events (transaction_hash)`
+    );
+    db.run(`
+        CREATE TABLE IF NOT EXISTS events_flat (
+          market_id TEXT NOT NULL,
+          block_number INTEGER NOT NULL,
+          tx_index INTEGER NOT NULL,
+          log_index INTEGER NOT NULL,
+          transaction_hash TEXT,
+          event_type TEXT NOT NULL,
+          timestamp INTEGER NOT NULL,
+          borrower TEXT,
+          assets INTEGER,
+          repaid_assets INTEGER,
+          prev_borrow_rate INTEGER,
+          PRIMARY KEY (market_id, block_number, tx_index, log_index)
+        )
+      `);
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_events_flat_market_block ON events_flat (market_id, block_number)`
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_events_flat_type_borrower ON events_flat (event_type, borrower)`
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_events_flat_type_timestamp ON events_flat (event_type, timestamp)`
     );
     db.run(`
       CREATE TABLE IF NOT EXISTS block_timestamps (
@@ -329,3 +354,80 @@ export function getEvents(
   const rows = d.query(sql).all(...args) as { payload: string }[];
   return rows.map((r) => reviveEvent(JSON.parse(r.payload) as Record<string, unknown>));
 }
+
+/**
+ * Rebuild the analytics-friendly events_flat table from the raw events table.
+ * Uses getEvents() so TimelineEvent decoding (incl. bigint revival) stays centralized.
+ */
+export function rebuildEventsFlat(): void {
+  const d = getDb();
+
+  // Clear existing flat rows (idempotent rebuild).
+  d.run("DELETE FROM events_flat");
+
+  // One pass per market keeps memory usage bounded even for large datasets.
+  const markets = d
+    .query(`SELECT DISTINCT market_id FROM events ORDER BY market_id`)
+    .all() as Array<{ market_id: string }>;
+
+  const insert = d.prepare(
+    `INSERT INTO events_flat (
+       market_id,
+       block_number,
+       tx_index,
+       log_index,
+       transaction_hash,
+       event_type,
+       timestamp,
+       borrower,
+       assets,
+       repaid_assets,
+       prev_borrow_rate
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  d.transaction(() => {
+    for (const { market_id } of markets) {
+      const timeline = getEvents(market_id);
+      for (const event of timeline) {
+        let borrower: string | null = null;
+        let assets: bigint | null = null;
+        let repaidAssets: bigint | null = null;
+        let prevBorrowRate: bigint | null = null;
+
+        switch (event.type) {
+          case "borrow":
+            borrower = event.borrower;
+            assets = event.assets;
+            break;
+          case "repay":
+            borrower = event.borrower;
+            assets = event.assets;
+            break;
+          case "liquidate":
+            borrower = event.borrower;
+            repaidAssets = event.repaidAssets;
+            break;
+          case "accrue":
+            prevBorrowRate = event.prevBorrowRate;
+            break;
+        }
+
+        insert.run(
+          event.marketId.toLowerCase(),
+          Number(event.blockNumber),
+          event.transactionIndex,
+          event.logIndex,
+          event.transactionHash,
+          event.type,
+          event.timestamp,
+          borrower,
+          assets == null ? null : Number(assets),
+          repaidAssets == null ? null : Number(repaidAssets),
+          prevBorrowRate == null ? null : Number(prevBorrowRate)
+        );
+      }
+    }
+  })();
+}
+
