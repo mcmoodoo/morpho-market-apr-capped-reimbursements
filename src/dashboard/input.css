@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .card {
+    @apply bg-white rounded-lg p-5 shadow-sm border border-gray-100;
+  }
+  .btn {
+    @apply px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply px-4 py-2 text-sm font-medium text-gray-700 bg-transparent rounded-md hover:bg-gray-100;
+  }
+  .table-container {
+    @apply overflow-x-auto rounded-lg border border-gray-200;
+  }
+  .stat-card {
+    @apply card flex flex-col;
+  }
+  .stat-value {
+    @apply text-2xl font-semibold tabular-nums;
+  }
+  .stat-label {
+    @apply text-sm text-gray-500 font-medium;
+  }
+}

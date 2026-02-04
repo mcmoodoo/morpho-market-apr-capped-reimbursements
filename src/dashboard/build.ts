@@ -1,13 +1,24 @@
 /**
  * Bundle dashboard app for the browser. Run before serving: bun run build:dashboard
  */
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const outdir = join(import.meta.dir, "dist");
+const dir = import.meta.dir;
+const outdir = join(dir, "dist");
+
+// Build Tailwind CSS
+const tw = spawnSync("bunx", ["tailwindcss", "-i", join(dir, "input.css"), "-o", join(dir, "styles.css")], {
+  stdio: "inherit",
+  cwd: join(dir, "../.."),
+});
+if (tw.status !== 0) {
+  process.exit(tw.status ?? 1);
+}
 
 const result = await Bun.build({
-  entrypoints: [join(import.meta.dir, "main.tsx")],
-  outdir,
+  entrypoints: [join(dir, "main.tsx")],
+  outdir: outdir,
   minify: false,
   target: "browser",
   sourcemap: "none",
