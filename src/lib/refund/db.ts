@@ -75,11 +75,11 @@ async function getDb(): Promise<SQL> {
 /** Overpayment amounts stored in micro-USDC (1e6 = 1 USDC). */
 export const OVERPAYMENT_DECIMALS = 6;
 
-/** Get all distinct market IDs from events table, ordered alphabetically. */
+/** Get all distinct market IDs from events table, ordered alphabetically. Always lowercase for consistent lookups. */
 export async function getMarkets(): Promise<string[]> {
   const db = await getDb();
   const rows = await db`SELECT DISTINCT market_id FROM events ORDER BY market_id` as Array<{ market_id: string }>;
-  return rows.map((r) => r.market_id);
+  return rows.map((r) => (r.market_id ?? "").toLowerCase()).filter(Boolean);
 }
 
 export interface MarketIndexerStatus {
@@ -113,7 +113,7 @@ export async function getIndexerStatus(): Promise<MarketIndexerStatus[]> {
     event_count: bigint | number;
   }>;
   return rows.map((r) => ({
-    marketId: r.market_id,
+    marketId: (r.market_id ?? "").toLowerCase(),
     minBlock: r.min_block != null ? Number(r.min_block) : null,
     maxBlock: r.max_block != null ? Number(r.max_block) : null,
     minTimestamp: r.min_ts != null ? Number(r.min_ts) : null,
@@ -225,18 +225,21 @@ export async function insertBlockTimestamps(
  * Read events for a market in timeline order (block_number, tx_index, log_index).
  * Optional block range filter.
  */
+const normalizedMarketId = (id: string) => id.trim().toLowerCase();
+
 export async function getEvents(
   marketId: string,
   fromBlock?: bigint,
   toBlock?: bigint
 ): Promise<TimelineEvent[]> {
   const db = await getDb();
+  const id = normalizedMarketId(marketId);
   let query;
   if (fromBlock !== undefined && toBlock !== undefined) {
     query = db`
       SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
       FROM events 
-      WHERE market_id = ${marketId.toLowerCase()} 
+      WHERE LOWER(TRIM(market_id)) = ${id} 
         AND block_number >= ${Number(fromBlock)} 
         AND block_number <= ${Number(toBlock)}
       ORDER BY block_number, tx_index, log_index
@@ -245,7 +248,7 @@ export async function getEvents(
     query = db`
       SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
       FROM events 
-      WHERE market_id = ${marketId.toLowerCase()} 
+      WHERE LOWER(TRIM(market_id)) = ${id} 
         AND block_number >= ${Number(fromBlock)}
       ORDER BY block_number, tx_index, log_index
     `;
@@ -253,7 +256,7 @@ export async function getEvents(
     query = db`
       SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
       FROM events 
-      WHERE market_id = ${marketId.toLowerCase()} 
+      WHERE LOWER(TRIM(market_id)) = ${id} 
         AND block_number <= ${Number(toBlock)}
       ORDER BY block_number, tx_index, log_index
     `;
@@ -261,7 +264,7 @@ export async function getEvents(
     query = db`
       SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
       FROM events 
-      WHERE market_id = ${marketId.toLowerCase()}
+      WHERE LOWER(TRIM(market_id)) = ${id}
       ORDER BY block_number, tx_index, log_index
     `;
   }
