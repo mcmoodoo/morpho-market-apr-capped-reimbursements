@@ -4,6 +4,10 @@ Off-chain indexer for Morpho Blue (Polygon): syncs market events to PostgreSQL a
 
 **Stack:** Bun, TypeScript, PostgreSQL (Bun.sql), viem, React (dashboard). No separate backend framework; API is `Bun.serve()` in `src/api/index.ts`.
 
+## Video
+
+[![YouTube](https://img.youtube.com/vi/MOT9ZUgJ5ao/maxresdefault.jpg)](https://youtu.be/MOT9ZUgJ5ao)
+
 ---
 
 ## Requirements
