@@ -9,6 +9,10 @@ export interface MarketOverpaymentsJson {
   eventCount: number;
   borrowerCount: number;
   totalOverpayment: string;
+  /** Distinct active borrowers when rate ≤ cap (1% APR). */
+  activeBorrowersUnderCap: number;
+  /** Distinct active borrowers when rate > cap. */
+  activeBorrowersAboveCap: number;
   borrowers: Array<{ borrowerAddress: string; overpayment: string }>;
 }
 
@@ -36,6 +40,8 @@ export interface MarketSummaryJson {
   eventCount: number;
   borrowerCount: number;
   totalOverpayment: string;
+  activeBorrowersUnderCap: number;
+  activeBorrowersAboveCap: number;
   startTimestamp: number | null;
   endTimestamp: number | null;
 }
@@ -69,6 +75,10 @@ async function apiError(res: Response): Promise<Error> {
   }
 }
 
+export interface ConfigJson {
+  aprCapPercent: number;
+}
+
 async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(path, BASE || window.location.origin);
   if (params) {
@@ -79,6 +89,10 @@ async function get<T>(path: string, params?: Record<string, string | number | un
   const res = await fetch(url.pathname + url.search);
   if (!res.ok) throw await apiError(res);
   return res.json();
+}
+
+export async function getConfig(): Promise<ConfigJson> {
+  return get<ConfigJson>("/config");
 }
 
 export async function getMarkets(): Promise<string[]> {

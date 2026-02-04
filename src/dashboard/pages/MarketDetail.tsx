@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { useMarketDetail, useMarketOverpayments, useTopBorrowers, useMarketEvents } from "../hooks/useApi";
+import { useConfig, useMarketDetail, useMarketOverpayments, useTopBorrowers, useMarketEvents } from "../hooks/useApi";
 import { microUsdcToUsdc } from "../api";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
@@ -12,6 +12,7 @@ export function MarketDetail() {
   const { marketId } = useParams<{ marketId: string }>();
   const setBorrower = useDashboardStore((s) => s.setSelectedBorrowerAddress);
 
+  const { data: config } = useConfig();
   const { data: detail, isLoading: loadingDetail, error: errorDetail } = useMarketDetail(marketId ?? null);
   const { data: overpayments, isLoading: loadingOver, error: errorOver } = useMarketOverpayments(marketId ?? null);
   const { data: topBorrowers, isLoading: loadingTop } = useTopBorrowers(marketId ?? null, 15);
@@ -61,7 +62,7 @@ export function MarketDetail() {
       </div>
 
       {detail && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
           <div className="stat-card">
             <span className="stat-label">Event count</span>
             <span className="stat-value">{detail.eventCount.toLocaleString()}</span>
@@ -87,6 +88,14 @@ export function MarketDetail() {
             <span className="stat-value text-green-700">
               {overpayments ? microUsdcToUsdc(overpayments.totalOverpayment) : "–"}
             </span>
+          </div>
+          <div className="stat-card" title={`Distinct borrowers who had debt when rate was ≤ ${config?.aprCapPercent ?? 1}% APR (cap)`}>
+            <span className="stat-label">Active borrowers (rate ≤ {config?.aprCapPercent ?? 1}% APR)</span>
+            <span className="stat-value">{overpayments?.activeBorrowersUnderCap ?? "–"}</span>
+          </div>
+          <div className="stat-card" title={`Distinct borrowers who had debt when rate was above ${config?.aprCapPercent ?? 1}% APR cap`}>
+            <span className="stat-label">Active borrowers (rate &gt; {config?.aprCapPercent ?? 1}% APR)</span>
+            <span className="stat-value">{overpayments?.activeBorrowersAboveCap ?? "–"}</span>
           </div>
         </div>
       )}

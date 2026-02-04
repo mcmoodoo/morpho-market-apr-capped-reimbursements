@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useDashboardStore } from "../store";
+import { useConfig } from "../hooks/useApi";
 
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { timeRangePreset, setTimeRangePreset } = useDashboardStore();
   const [borrowerInput, setBorrowerInput] = useState("");
+  const { data: config } = useConfig();
 
   const handleBorrowerLookup = (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,6 +38,11 @@ export function Layout() {
               </button>
             </form>
             <nav className="flex items-center gap-4 shrink-0">
+              {config != null && (
+                <span className="text-xs text-gray-400" title="Interest above this APR is counted as overpayment">
+                  APR cap: {config.aprCapPercent}%
+                </span>
+              )}
               <Link
                 to="/"
                 className={`text-sm font-medium ${location.pathname === "/" ? "text-white" : "text-gray-300 hover:text-white"}`}

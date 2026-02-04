@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
-import { useMarketSummary } from "../hooks/useApi";
+import { useConfig, useMarketSummary } from "../hooks/useApi";
 import { microUsdcToUsdc } from "../api";
 import { format } from "date-fns";
 
 export function MarketsOverview() {
+  const { data: config } = useConfig();
   const { data: summary, isLoading, error } = useMarketSummary();
+  const capLabel = config != null ? `${config.aprCapPercent}%` : "cap";
 
   if (isLoading) {
     return (
@@ -49,6 +51,14 @@ export function MarketsOverview() {
               <div>
                 <span className="text-gray-500">Borrowers (overpay)</span>
                 <div className="font-semibold tabular-nums">{m.borrowerCount}</div>
+              </div>
+              <div>
+                <span className="text-gray-500" title={`Active when rate ≤ ${capLabel} APR`}>Under {capLabel}</span>
+                <div className="font-semibold tabular-nums">{m.activeBorrowersUnderCap}</div>
+              </div>
+              <div>
+                <span className="text-gray-500" title={`Active when rate > ${capLabel} APR`}>Above {capLabel}</span>
+                <div className="font-semibold tabular-nums">{m.activeBorrowersAboveCap}</div>
               </div>
               <div className="col-span-2">
                 <span className="text-gray-500">Total overpayment (USDC)</span>

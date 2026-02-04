@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  getConfig,
   getMarkets,
   getIndexerStatus,
   getMarketDetail,
@@ -11,6 +12,13 @@ import {
   getBorrowerEvents,
 } from "../api";
 import { useDashboardStore } from "../store";
+
+export function useConfig() {
+  return useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+  });
+}
 
 export function useMarkets() {
   return useQuery({

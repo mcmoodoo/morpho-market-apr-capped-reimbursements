@@ -12,20 +12,29 @@ import type {
   TimelineEvent,
 } from "./types.ts";
 
+export interface OverpaymentsResult {
+  overpayments: Map<string, bigint>;
+  /** Distinct borrowers who had debt during at least one segment where rate ≤ cap. */
+  activeBorrowersUnderCap: number;
+  /** Distinct borrowers who had debt during at least one segment where rate > cap. */
+  activeBorrowersAboveCap: number;
+}
+
 /**
- * Calculate overpayments per borrower for the report window [startTimestamp, endTimestamp].
+ * Calculate overpayments and active-borrower counts for the report window [startTimestamp, endTimestamp].
  * Timeline must be sorted by (blockNumber, transactionIndex, logIndex).
- * Returns map: borrower address → overpayment in assets (e.g. USDC).
  */
-export function calculateOverpayments(
+export function calculateOverpaymentsWithStats(
   timeline: TimelineEvent[],
   startTimestamp: number,
   endTimestamp: number
-): Map<string, bigint> {
+): OverpaymentsResult {
   const borrowerDebts = new Map<string, bigint>();
   let currentRate = 0n;
   let lastTimestamp = startTimestamp;
   const overpayments = new Map<string, bigint>();
+  const borrowersUnderCap = new Set<string>();
+  const borrowersAboveCap = new Set<string>();
 
   function accrueSegment(toTimestamp: number): void {
     const segmentStart = Math.max(lastTimestamp, startTimestamp);
@@ -36,16 +45,22 @@ export function calculateOverpayments(
     if (elapsed <= 0) return;
 
     const elapsedBigInt = BigInt(elapsed);
+    const rateAboveCap = currentRate > APR_CAP_PER_SECOND;
 
-    if (currentRate > APR_CAP_PER_SECOND) {
+    if (rateAboveCap) {
       const excessRate = currentRate - APR_CAP_PER_SECOND;
       for (const [borrower, debt] of borrowerDebts) {
         if (debt > 0n) {
+          borrowersAboveCap.add(borrower);
           const overpayment =
             (debt * excessRate * elapsedBigInt) / WAD;
           const existing = overpayments.get(borrower) ?? 0n;
           overpayments.set(borrower, existing + overpayment);
         }
+      }
+    } else {
+      for (const [borrower, debt] of borrowerDebts) {
+        if (debt > 0n) borrowersUnderCap.add(borrower);
       }
     }
 
@@ -95,5 +110,21 @@ export function calculateOverpayments(
 
   accrueSegment(endTimestamp);
 
-  return overpayments;
+  return {
+    overpayments,
+    activeBorrowersUnderCap: borrowersUnderCap.size,
+    activeBorrowersAboveCap: borrowersAboveCap.size,
+  };
+}
+
+/**
+ * Calculate overpayments per borrower (convenience wrapper).
+ * Returns only the overpayments map for callers that do not need active-borrower counts.
+ */
+export function calculateOverpayments(
+  timeline: TimelineEvent[],
+  startTimestamp: number,
+  endTimestamp: number
+): Map<string, bigint> {
+  return calculateOverpaymentsWithStats(timeline, startTimestamp, endTimestamp).overpayments;
 }

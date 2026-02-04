@@ -13,7 +13,8 @@
 
 import { join } from "node:path";
 import { getEvents, getMarkets, getIndexerStatus } from "../lib/refund/db.ts";
-import { calculateOverpayments } from "../lib/refund/calculator.ts";
+import { calculateOverpayments, calculateOverpaymentsWithStats } from "../lib/refund/calculator.ts";
+import { APR_CAP_PERCENT } from "../lib/refund/config.ts";
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 const DASHBOARD_DIR = join(import.meta.dir, "../dashboard");
@@ -44,6 +45,11 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
   // GET /health
   if (pathSegments.length === 1 && pathSegments[0] === "health") {
     return jsonResponse({ status: "ok" });
+  }
+
+  // GET /config (e.g. APR cap used for overpayment logic)
+  if (pathSegments.length === 1 && pathSegments[0] === "config") {
+    return jsonResponse({ aprCapPercent: Number(APR_CAP_PERCENT) });
   }
 
   // GET /status/indexer
@@ -87,8 +93,8 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
 
     const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
     const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
-    const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
-    const entries = [...overpayments.entries()]
+    const result = calculateOverpaymentsWithStats(timeline, startTimestamp, endTimestamp);
+    const entries = [...result.overpayments.entries()]
       .filter(([, amount]) => amount > 0n)
       .sort((a, b) => (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0));
     const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
@@ -100,6 +106,8 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
       eventCount: timeline.length,
       borrowerCount: entries.length,
       totalOverpayment: totalOverpayment.toString(),
+      activeBorrowersUnderCap: result.activeBorrowersUnderCap,
+      activeBorrowersAboveCap: result.activeBorrowersAboveCap,
       borrowers: entries.map(([address, amount]) => ({
         borrowerAddress: address,
         overpayment: amount.toString(),
@@ -251,6 +259,8 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
       eventCount: number;
       borrowerCount: number;
       totalOverpayment: string;
+      activeBorrowersUnderCap: number;
+      activeBorrowersAboveCap: number;
       startTimestamp: number | null;
       endTimestamp: number | null;
     }> = [];
@@ -269,6 +279,8 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
           eventCount: 0,
           borrowerCount: 0,
           totalOverpayment: "0",
+          activeBorrowersUnderCap: 0,
+          activeBorrowersAboveCap: 0,
           startTimestamp: null,
           endTimestamp: null,
         });
@@ -276,14 +288,16 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
       }
       const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
       const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
-      const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
-      const entries = [...overpayments.entries()].filter(([, amount]) => amount > 0n);
+      const result = calculateOverpaymentsWithStats(timeline, startTimestamp, endTimestamp);
+      const entries = [...result.overpayments.entries()].filter(([, amount]) => amount > 0n);
       const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
       summary.push({
         marketId,
         eventCount: timeline.length,
         borrowerCount: entries.length,
         totalOverpayment: totalOverpayment.toString(),
+        activeBorrowersUnderCap: result.activeBorrowersUnderCap,
+        activeBorrowersAboveCap: result.activeBorrowersAboveCap,
         startTimestamp,
         endTimestamp,
       });
