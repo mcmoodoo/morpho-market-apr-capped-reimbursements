@@ -231,6 +231,13 @@ export function getOverpaymentsByBorrower(borrowerAddress: string): BorrowerOver
   }));
 }
 
+/** Get all distinct market IDs from events table, ordered alphabetically. */
+export function getMarkets(): string[] {
+  const d = getDb();
+  const rows = d.query(`SELECT DISTINCT market_id FROM events ORDER BY market_id`).all() as Array<{ market_id: string }>;
+  return rows.map((r) => r.market_id);
+}
+
 /** Max block_number in events table (any market), or null if empty. */
 export function getMaxBlockInEvents(): bigint | null {
   const d = getDb();

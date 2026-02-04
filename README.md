@@ -10,7 +10,7 @@ bun install
 
 ## Environment
 
-- **INFURA_ARBITRUM_MAINNET_RPC** – Arbitrum One RPC URL.
+- **INFURA_POLYGON_MAINNET_RPC** – Polygon mainnet RPC URL.
 
 ## Run
 

@@ -3,15 +3,15 @@
  * Always writes JSON to a file; stdout is human table (default) or JSON (--json).
  *
  * Usage:
- *   bun run src/scripts/refund-report.ts [--market <id>] [--from-block N] [--to-block N] [--output path.json] [--json]
+ *   bun run src/scripts/refund-report.ts --market <id> [--from-block N] [--to-block N] [--output path.json] [--json]
  *
- * Default market: MARKET_ID from config. Default output file: reports/refund-report.json
+ * Default output file: reports/refund-report.json
  */
 
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { formatUnits } from "viem";
-import { MARKET_ID, USDC_DECIMALS } from "../lib/refund/config.ts";
+import { USDC_DECIMALS } from "../lib/refund/config.ts";
 import { getEvents, insertReport, insertReportOverpayments } from "../lib/refund/db.ts";
 import { calculateOverpayments } from "../lib/refund/calculator.ts";
 
@@ -25,7 +25,7 @@ function parseArgs(): {
   json: boolean;
 } {
   const args = process.argv.slice(2);
-  let marketId = MARKET_ID;
+  let marketId: string | undefined;
   let fromBlock: bigint | undefined;
   let toBlock: bigint | undefined;
   let outputPath = DEFAULT_OUTPUT_PATH;
@@ -43,6 +43,12 @@ function parseArgs(): {
     } else if (args[i] === "--json") {
       json = true;
     }
+  }
+
+  if (!marketId) {
+    console.error("Error: --market <id> is required");
+    console.error("Usage: bun run src/scripts/refund-report.ts --market <id> [--from-block N] [--to-block N] [--output path.json] [--json]");
+    process.exit(1);
   }
 
   return { marketId, fromBlock, toBlock, outputPath, json };

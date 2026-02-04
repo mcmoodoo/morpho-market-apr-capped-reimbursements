@@ -4,6 +4,7 @@
  *
  * Endpoints:
  *   GET /health
+ *   GET /markets
  *   GET /reports/latest?marketId=0x...
  *   GET /reports/:id
  *   GET /reports/:id/overpayments
@@ -18,6 +19,7 @@ import {
   getLatestReportForMarket,
   getOverpaymentsForReport,
   getOverpaymentsByBorrower,
+  getMarkets,
   type Report,
   type ReportOverpaymentRow,
   type BorrowerOverpaymentRow,
@@ -77,6 +79,12 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
   // GET /health
   if (pathSegments.length === 1 && pathSegments[0] === "health") {
     return jsonResponse({ status: "ok" });
+  }
+
+  // GET /markets
+  if (pathSegments.length === 1 && pathSegments[0] === "markets") {
+    const markets = getMarkets();
+    return jsonResponse({ markets });
   }
 
   // GET /reports/latest?marketId=...

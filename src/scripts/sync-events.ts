@@ -11,7 +11,7 @@
  */
 
 import { createPublicClient, http } from "viem";
-import { arbitrum } from "viem/chains";
+import { polygon } from "viem/chains";
 import { fetchAllEvents } from "../lib/refund/events.ts";
 import { getMaxBlockInEvents, insertBlockTimestamps, insertEvents } from "../lib/refund/db.ts";
 import type { TimelineEvent } from "../lib/refund/types.ts";
@@ -72,14 +72,14 @@ function buildTimeline(
 
 async function main() {
   const { startBlock: startBlockArg } = parseArgs();
-  const rpc = process.env.INFURA_ARBITRUM_MAINNET_RPC;
+  const rpc = process.env.INFURA_POLYGON_MAINNET_RPC;
   if (!rpc) {
-    console.error("INFURA_ARBITRUM_MAINNET_RPC not set");
+    console.error("INFURA_POLYGON_MAINNET_RPC not set");
     process.exit(1);
   }
 
   const client = createPublicClient({
-    chain: arbitrum,
+    chain: polygon,
     transport: http(rpc),
   });
 

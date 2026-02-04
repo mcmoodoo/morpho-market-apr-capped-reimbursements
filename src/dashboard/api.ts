@@ -58,8 +58,13 @@ export async function getOverpaymentsByBorrower(address: string): Promise<Borrow
   return data.overpayments ?? [];
 }
 
-/** Default market (same as config MARKET_ID). */
-export const DEFAULT_MARKET_ID = "0xe6392ff19d10454b099d692b58c361ef93e31af34ed1ef78232e07c78fe99169";
+/** Get list of available markets from the API. */
+export async function getMarkets(): Promise<string[]> {
+  const res = await fetch(`${BASE}/markets`);
+  if (!res.ok) throw await apiError(res);
+  const data = await res.json();
+  return data.markets ?? [];
+}
 
 export function microUsdcToUsdc(micro: string): string {
   const n = Number(micro) / 1e6;
