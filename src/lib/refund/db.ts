@@ -134,6 +134,101 @@ export function insertReportOverpayments(
   })();
 }
 
+/** Full report row as returned from reads (id + created_at + ReportRow fields). Amounts in micro-USDC. */
+export interface Report {
+  id: number;
+  marketId: string;
+  fromBlock: number | null;
+  toBlock: number | null;
+  startTimestamp: number;
+  endTimestamp: number;
+  eventCount: number;
+  borrowerCount: number;
+  totalOverpayment: bigint;
+  createdAt: number;
+}
+
+function rowToReport(row: Record<string, unknown>): Report {
+  return {
+    id: row.id as number,
+    marketId: (row.market_id as string) ?? "",
+    fromBlock: (row.from_block as number) ?? null,
+    toBlock: (row.to_block as number) ?? null,
+    startTimestamp: row.start_timestamp as number,
+    endTimestamp: row.end_timestamp as number,
+    eventCount: row.event_count as number,
+    borrowerCount: row.borrower_count as number,
+    totalOverpayment: BigInt((row.total_overpayment as number) ?? 0),
+    createdAt: row.created_at as number,
+  };
+}
+
+/** Get a single report by id, or null if not found. */
+export function getReportById(id: number): Report | null {
+  const d = getDb();
+  const row = d.query(`SELECT * FROM reports WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return rowToReport(row);
+}
+
+/** Get the latest report for a market (by created_at desc), or null if none. */
+export function getLatestReportForMarket(marketId: string): Report | null {
+  const d = getDb();
+  const row = d
+    .query(`SELECT * FROM reports WHERE market_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .get(marketId.toLowerCase()) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return rowToReport(row);
+}
+
+/** Overpayment row for a report (borrower + amount in micro-USDC). */
+export interface ReportOverpaymentRow {
+  borrowerAddress: string;
+  overpayment: bigint;
+}
+
+/** Get all overpayments for a report, ordered by overpayment descending. */
+export function getOverpaymentsForReport(reportId: number): ReportOverpaymentRow[] {
+  const d = getDb();
+  const rows = d
+    .query(
+      `SELECT borrower_address, overpayment FROM report_overpayments WHERE report_id = ? ORDER BY overpayment DESC`
+    )
+    .all(reportId) as Array<{ borrower_address: string; overpayment: number }>;
+  return rows.map((r) => ({
+    borrowerAddress: r.borrower_address,
+    overpayment: BigInt(r.overpayment),
+  }));
+}
+
+/** Per-borrower overpayment with report context (for "all reports where this borrower had overpayment"). */
+export interface BorrowerOverpaymentRow {
+  reportId: number;
+  marketId: string;
+  createdAt: number;
+  overpayment: bigint;
+}
+
+/** Get all overpayments for a borrower across reports, with report metadata. Ordered by created_at desc. */
+export function getOverpaymentsByBorrower(borrowerAddress: string): BorrowerOverpaymentRow[] {
+  const d = getDb();
+  const rows = d
+    .query(
+      `SELECT r.id AS report_id, r.market_id, r.created_at, o.overpayment
+       FROM report_overpayments o
+       JOIN reports r ON r.id = o.report_id
+       WHERE o.borrower_address = ?
+       ORDER BY r.created_at DESC`
+    )
+    .all(borrowerAddress.toLowerCase()) as Array<{ report_id: number; market_id: string; created_at: number; overpayment: number }>;
+  return rows.map((r) => ({
+    reportId: r.report_id,
+    marketId: r.market_id,
+    createdAt: r.created_at,
+    overpayment: BigInt(r.overpayment),
+  }));
+}
+
 /** Max block_number in events table (any market), or null if empty. */
 export function getMaxBlockInEvents(): bigint | null {
   const d = getDb();
