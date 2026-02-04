@@ -12,7 +12,7 @@
  */
 
 import { join } from "node:path";
-import { getEvents, getMarkets } from "../lib/refund/db.ts";
+import { getEvents, getMarkets, getIndexerStatus } from "../lib/refund/db.ts";
 import { calculateOverpayments } from "../lib/refund/calculator.ts";
 
 const PORT = Number(process.env.API_PORT ?? 3000);
@@ -34,10 +34,22 @@ function errorResponse(message: string, status: number): Response {
   return jsonResponse({ error: message }, status);
 }
 
+function parseIntParam(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function handleGet(pathSegments: string[], searchParams: URLSearchParams): Response {
   // GET /health
   if (pathSegments.length === 1 && pathSegments[0] === "health") {
     return jsonResponse({ status: "ok" });
+  }
+
+  // GET /status/indexer
+  if (pathSegments.length === 2 && pathSegments[0] === "status" && pathSegments[1] === "indexer") {
+    const status = getIndexerStatus();
+    return jsonResponse({ markets: status });
   }
 
   // GET /markets
@@ -46,12 +58,33 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     return jsonResponse({ markets });
   }
 
-  // GET /markets/:marketId/overpayments
+  // GET /markets/:marketId
+  if (pathSegments.length === 2 && pathSegments[0] === "markets") {
+    const marketId = pathSegments[1];
+    if (!marketId) return errorResponse("Missing market id", 400);
+    const status = getIndexerStatus().find((m) => m.marketId === marketId.toLowerCase());
+    if (!status) return errorResponse("Market not found", 404);
+    return jsonResponse(status);
+  }
+
+  // GET /markets/:marketId/overpayments[?fromTs=&toTs=]
   if (pathSegments.length === 3 && pathSegments[0] === "markets" && pathSegments[2] === "overpayments") {
     const marketId = pathSegments[1];
     if (!marketId) return errorResponse("Missing market id", 400);
-    const timeline = getEvents(marketId.trim());
+    const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
+    const toTs = parseIntParam(searchParams.get("toTimestamp"));
+
+    let timeline = getEvents(marketId.trim());
     if (timeline.length === 0) return errorResponse("No events found for this market", 404);
+
+    if (fromTs !== undefined) {
+      timeline = timeline.filter((e) => e.timestamp >= fromTs);
+    }
+    if (toTs !== undefined) {
+      timeline = timeline.filter((e) => e.timestamp <= toTs);
+    }
+    if (timeline.length === 0) return errorResponse("No events in requested window", 404);
+
     const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
     const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
     const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
@@ -59,6 +92,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
       .filter(([, amount]) => amount > 0n)
       .sort((a, b) => (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0));
     const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
+
     return jsonResponse({
       marketId: marketId.trim().toLowerCase(),
       startTimestamp,
@@ -73,6 +107,35 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     });
   }
 
+  // GET /markets/:marketId/events[?type=&fromBlock=&toBlock=&limit=&offset=]
+  if (pathSegments.length === 3 && pathSegments[0] === "markets" && pathSegments[2] === "events") {
+    const marketId = pathSegments[1];
+    if (!marketId) return errorResponse("Missing market id", 400);
+    const type = searchParams.get("type");
+    const fromBlockParam = parseIntParam(searchParams.get("fromBlock"));
+    const toBlockParam = parseIntParam(searchParams.get("toBlock"));
+    const limit = parseIntParam(searchParams.get("limit")) ?? 100;
+    const offset = parseIntParam(searchParams.get("offset")) ?? 0;
+
+    let fromBlock: bigint | undefined;
+    let toBlock: bigint | undefined;
+    if (fromBlockParam !== undefined) fromBlock = BigInt(fromBlockParam);
+    if (toBlockParam !== undefined) toBlock = BigInt(toBlockParam);
+
+    let events = getEvents(marketId.trim(), fromBlock, toBlock);
+    if (type) {
+      events = events.filter((e) => e.type === type);
+    }
+    const total = events.length;
+    const slice = events.slice(offset, offset + limit);
+
+    return jsonResponse({
+      marketId: marketId.trim().toLowerCase(),
+      total,
+      events: slice,
+    });
+  }
+
   // GET /borrowers/:address/overpayments
   if (pathSegments.length === 3 && pathSegments[0] === "borrowers" && pathSegments[2] === "overpayments") {
     const address = pathSegments[1];
@@ -80,10 +143,20 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
       return errorResponse("Invalid borrower address", 400);
     }
     const normalized = address.trim().toLowerCase();
-    const markets = getMarkets();
+    const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
+    const toTs = parseIntParam(searchParams.get("toTimestamp"));
+    const marketFilter = searchParams.get("marketId")?.toLowerCase();
+
+    const markets = getMarkets().filter((m) => !marketFilter || m === marketFilter);
     const overpayments: Array<{ marketId: string; overpayment: string }> = [];
     for (const marketId of markets) {
-      const timeline = getEvents(marketId);
+      let timeline = getEvents(marketId);
+      if (fromTs !== undefined) {
+        timeline = timeline.filter((e) => e.timestamp >= fromTs);
+      }
+      if (toTs !== undefined) {
+        timeline = timeline.filter((e) => e.timestamp <= toTs);
+      }
       if (timeline.length === 0) continue;
       const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
       const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
@@ -94,6 +167,129 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
       }
     }
     return jsonResponse({ borrowerAddress: address, overpayments });
+  }
+
+  // GET /borrowers/:address/events[?marketId=&type=&fromBlock=&toBlock=&limit=&offset=]
+  if (pathSegments.length === 3 && pathSegments[0] === "borrowers" && pathSegments[2] === "events") {
+    const address = pathSegments[1];
+    if (!address || !address.startsWith("0x") || address.length < 10) {
+      return errorResponse("Invalid borrower address", 400);
+    }
+    const normalized = address.trim().toLowerCase();
+    const marketFilter = searchParams.get("marketId")?.toLowerCase();
+    const type = searchParams.get("type");
+    const fromBlockParam = parseIntParam(searchParams.get("fromBlock"));
+    const toBlockParam = parseIntParam(searchParams.get("toBlock"));
+    const limit = parseIntParam(searchParams.get("limit")) ?? 100;
+    const offset = parseIntParam(searchParams.get("offset")) ?? 0;
+
+    let fromBlock: bigint | undefined;
+    let toBlock: bigint | undefined;
+    if (fromBlockParam !== undefined) fromBlock = BigInt(fromBlockParam);
+    if (toBlockParam !== undefined) toBlock = BigInt(toBlockParam);
+
+    const markets = getMarkets().filter((m) => !marketFilter || m === marketFilter);
+    const all: unknown[] = [];
+    for (const marketId of markets) {
+      let events = getEvents(marketId, fromBlock, toBlock).filter(
+        (e) =>
+          ("borrower" in e ? (e as any).borrower?.toLowerCase() === normalized : false) &&
+          (!type || e.type === type)
+      );
+      for (const e of events) {
+        all.push({ marketId, event: e });
+      }
+    }
+    const total = all.length;
+    const slice = all.slice(offset, offset + limit);
+    return jsonResponse({ borrowerAddress: address, total, events: slice });
+  }
+
+  // GET /analytics/top-borrowers?marketId=...&fromTimestamp=&toTimestamp=&limit=
+  if (pathSegments.length === 2 && pathSegments[0] === "analytics" && pathSegments[1] === "top-borrowers") {
+    const marketId = searchParams.get("marketId");
+    if (!marketId) return errorResponse("Missing marketId", 400);
+    const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
+    const toTs = parseIntParam(searchParams.get("toTimestamp"));
+    const limit = parseIntParam(searchParams.get("limit")) ?? 50;
+
+    let timeline = getEvents(marketId.trim());
+    if (fromTs !== undefined) {
+      timeline = timeline.filter((e) => e.timestamp >= fromTs);
+    }
+    if (toTs !== undefined) {
+      timeline = timeline.filter((e) => e.timestamp <= toTs);
+    }
+    if (timeline.length === 0) return errorResponse("No events for this market/window", 404);
+
+    const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
+    const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
+    const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
+    const entries = [...overpayments.entries()]
+      .filter(([, amount]) => amount > 0n)
+      .sort((a, b) => (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0))
+      .slice(0, limit);
+
+    return jsonResponse({
+      marketId: marketId.trim().toLowerCase(),
+      fromTimestamp: fromTs ?? startTimestamp,
+      toTimestamp: toTs ?? endTimestamp,
+      borrowers: entries.map(([address, amount]) => ({
+        borrowerAddress: address,
+        overpayment: amount.toString(),
+      })),
+    });
+  }
+
+  // GET /analytics/market-summary?fromTimestamp=&toTimestamp=
+  if (pathSegments.length === 2 && pathSegments[0] === "analytics" && pathSegments[1] === "market-summary") {
+    const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
+    const toTs = parseIntParam(searchParams.get("toTimestamp"));
+    const markets = getMarkets();
+    const summary: Array<{
+      marketId: string;
+      eventCount: number;
+      borrowerCount: number;
+      totalOverpayment: string;
+      startTimestamp: number | null;
+      endTimestamp: number | null;
+    }> = [];
+
+    for (const marketId of markets) {
+      let timeline = getEvents(marketId);
+      if (fromTs !== undefined) {
+        timeline = timeline.filter((e) => e.timestamp >= fromTs);
+      }
+      if (toTs !== undefined) {
+        timeline = timeline.filter((e) => e.timestamp <= toTs);
+      }
+      if (timeline.length === 0) {
+        summary.push({
+          marketId,
+          eventCount: 0,
+          borrowerCount: 0,
+          totalOverpayment: "0",
+          startTimestamp: null,
+          endTimestamp: null,
+        });
+        continue;
+      }
+      const startTimestamp = Math.min(...timeline.map((e) => e.timestamp));
+      const endTimestamp = Math.max(...timeline.map((e) => e.timestamp));
+      const overpayments = calculateOverpayments(timeline, startTimestamp, endTimestamp);
+      const entries = [...overpayments.entries()].filter(([, amount]) => amount > 0n);
+      const totalOverpayment = entries.reduce((sum, [, amount]) => sum + amount, 0n);
+      summary.push({
+        marketId,
+        eventCount: timeline.length,
+        borrowerCount: entries.length,
+        totalOverpayment: totalOverpayment.toString(),
+        startTimestamp,
+        endTimestamp,
+      });
+    }
+
+    return jsonResponse({ markets: summary });
   }
 
   return errorResponse("Not found", 404);

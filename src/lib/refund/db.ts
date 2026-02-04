@@ -60,6 +60,48 @@ export function getMarkets(): string[] {
   return rows.map((r) => r.market_id);
 }
 
+export interface MarketIndexerStatus {
+  marketId: string;
+  minBlock: number | null;
+  maxBlock: number | null;
+  minTimestamp: number | null;
+  maxTimestamp: number | null;
+  eventCount: number;
+}
+
+/** Get basic indexer coverage stats per market from events table. */
+export function getIndexerStatus(): MarketIndexerStatus[] {
+  const d = getDb();
+  const rows = d
+    .query(
+      `SELECT market_id,
+              MIN(block_number)    AS min_block,
+              MAX(block_number)    AS max_block,
+              MIN(timestamp)       AS min_ts,
+              MAX(timestamp)       AS max_ts,
+              COUNT(*)             AS event_count
+       FROM events
+       GROUP BY market_id
+       ORDER BY market_id`
+    )
+    .all() as Array<{
+      market_id: string;
+      min_block: number | null;
+      max_block: number | null;
+      min_ts: number | null;
+      max_ts: number | null;
+      event_count: number;
+    }>;
+  return rows.map((r) => ({
+    marketId: r.market_id,
+    minBlock: r.min_block ?? null,
+    maxBlock: r.max_block ?? null,
+    minTimestamp: r.min_ts ?? null,
+    maxTimestamp: r.max_ts ?? null,
+    eventCount: r.event_count ?? 0,
+  }));
+}
+
 /** Max block_number in events table (any market), or null if empty. */
 export function getMaxBlockInEvents(): bigint | null {
   const d = getDb();
