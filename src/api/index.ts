@@ -297,7 +297,7 @@ async function handleGet(pathSegments: string[], searchParams: URLSearchParams):
 
 const server = Bun.serve({
   port: PORT,
-  fetch(req) {
+  async fetch(req) {
     if (req.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
