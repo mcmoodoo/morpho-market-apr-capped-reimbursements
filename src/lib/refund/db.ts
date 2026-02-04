@@ -25,9 +25,9 @@ function getDb(): Database {
         event_type TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         borrower TEXT,
-        assets INTEGER,
-        repaid_assets INTEGER,
-        prev_borrow_rate INTEGER,
+        assets TEXT,
+        repaid_assets TEXT,
+        prev_borrow_rate TEXT,
         PRIMARY KEY (market_id, block_number, tx_index, log_index)
       )
     `);
@@ -170,9 +170,9 @@ export function insertEvents(events: TimelineEvent[]): void {
         event.type,
         event.timestamp,
         borrower,
-        assets == null ? null : Number(assets),
-        repaidAssets == null ? null : Number(repaidAssets),
-        prevBorrowRate == null ? null : Number(prevBorrowRate)
+        assets == null ? null : assets.toString(),
+        repaidAssets == null ? null : repaidAssets.toString(),
+        prevBorrowRate == null ? null : prevBorrowRate.toString()
       );
     }
   })();
@@ -224,9 +224,9 @@ export function getEvents(
     event_type: string;
     timestamp: number;
     borrower: string | null;
-    assets: number | null;
-    repaid_assets: number | null;
-    prev_borrow_rate: number | null;
+    assets: string | null;
+    repaid_assets: string | null;
+    prev_borrow_rate: string | null;
   }>;
 
   const out: TimelineEvent[] = [];
@@ -246,7 +246,7 @@ export function getEvents(
           type: "borrow",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null ? BigInt(row.assets) : 0n,
+          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
         });
         break;
       case "repay":
@@ -254,7 +254,7 @@ export function getEvents(
           type: "repay",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null ? BigInt(row.assets) : 0n,
+          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
         });
         break;
       case "liquidate":
@@ -262,7 +262,7 @@ export function getEvents(
           type: "liquidate",
           ...common,
           borrower: row.borrower ?? "",
-          repaidAssets: row.repaid_assets != null ? BigInt(row.repaid_assets) : 0n,
+          repaidAssets: row.repaid_assets != null && row.repaid_assets !== "" ? BigInt(row.repaid_assets) : 0n,
         });
         break;
       case "accrue":
@@ -270,7 +270,7 @@ export function getEvents(
         out.push({
           type: "accrue",
           ...common,
-          prevBorrowRate: row.prev_borrow_rate != null ? BigInt(row.prev_borrow_rate) : 0n,
+          prevBorrowRate: row.prev_borrow_rate != null && row.prev_borrow_rate !== "" ? BigInt(row.prev_borrow_rate) : 0n,
         });
         break;
     }
