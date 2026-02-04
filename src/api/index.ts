@@ -40,7 +40,7 @@ function parseIntParam(value: string | null): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function handleGet(pathSegments: string[], searchParams: URLSearchParams): Response {
+async function handleGet(pathSegments: string[], searchParams: URLSearchParams): Promise<Response> {
   // GET /health
   if (pathSegments.length === 1 && pathSegments[0] === "health") {
     return jsonResponse({ status: "ok" });
@@ -48,13 +48,13 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
 
   // GET /status/indexer
   if (pathSegments.length === 2 && pathSegments[0] === "status" && pathSegments[1] === "indexer") {
-    const status = getIndexerStatus();
+    const status = await getIndexerStatus();
     return jsonResponse({ markets: status });
   }
 
   // GET /markets
   if (pathSegments.length === 1 && pathSegments[0] === "markets") {
-    const markets = getMarkets();
+    const markets = await getMarkets();
     return jsonResponse({ markets });
   }
 
@@ -62,7 +62,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
   if (pathSegments.length === 2 && pathSegments[0] === "markets") {
     const marketId = pathSegments[1];
     if (!marketId) return errorResponse("Missing market id", 400);
-    const status = getIndexerStatus().find((m) => m.marketId === marketId.toLowerCase());
+    const status = (await getIndexerStatus()).find((m) => m.marketId === marketId.toLowerCase());
     if (!status) return errorResponse("Market not found", 404);
     return jsonResponse(status);
   }
@@ -74,7 +74,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
     const toTs = parseIntParam(searchParams.get("toTimestamp"));
 
-    let timeline = getEvents(marketId.trim());
+    let timeline = await getEvents(marketId.trim());
     if (timeline.length === 0) return errorResponse("No events found for this market", 404);
 
     if (fromTs !== undefined) {
@@ -122,7 +122,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     if (fromBlockParam !== undefined) fromBlock = BigInt(fromBlockParam);
     if (toBlockParam !== undefined) toBlock = BigInt(toBlockParam);
 
-    let events = getEvents(marketId.trim(), fromBlock, toBlock);
+    let events = await getEvents(marketId.trim(), fromBlock, toBlock);
     if (type) {
       events = events.filter((e) => e.type === type);
     }
@@ -147,10 +147,10 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     const toTs = parseIntParam(searchParams.get("toTimestamp"));
     const marketFilter = searchParams.get("marketId")?.toLowerCase();
 
-    const markets = getMarkets().filter((m) => !marketFilter || m === marketFilter);
+    const markets = (await getMarkets()).filter((m) => !marketFilter || m === marketFilter);
     const overpayments: Array<{ marketId: string; overpayment: string }> = [];
     for (const marketId of markets) {
-      let timeline = getEvents(marketId);
+      let timeline = await getEvents(marketId);
       if (fromTs !== undefined) {
         timeline = timeline.filter((e) => e.timestamp >= fromTs);
       }
@@ -188,10 +188,10 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     if (fromBlockParam !== undefined) fromBlock = BigInt(fromBlockParam);
     if (toBlockParam !== undefined) toBlock = BigInt(toBlockParam);
 
-    const markets = getMarkets().filter((m) => !marketFilter || m === marketFilter);
+    const markets = (await getMarkets()).filter((m) => !marketFilter || m === marketFilter);
     const all: unknown[] = [];
     for (const marketId of markets) {
-      let events = getEvents(marketId, fromBlock, toBlock).filter(
+      let events = (await getEvents(marketId, fromBlock, toBlock)).filter(
         (e) =>
           ("borrower" in e ? (e as any).borrower?.toLowerCase() === normalized : false) &&
           (!type || e.type === type)
@@ -213,7 +213,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     const toTs = parseIntParam(searchParams.get("toTimestamp"));
     const limit = parseIntParam(searchParams.get("limit")) ?? 50;
 
-    let timeline = getEvents(marketId.trim());
+    let timeline = await getEvents(marketId.trim());
     if (fromTs !== undefined) {
       timeline = timeline.filter((e) => e.timestamp >= fromTs);
     }
@@ -245,7 +245,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
   if (pathSegments.length === 2 && pathSegments[0] === "analytics" && pathSegments[1] === "market-summary") {
     const fromTs = parseIntParam(searchParams.get("fromTimestamp"));
     const toTs = parseIntParam(searchParams.get("toTimestamp"));
-    const markets = getMarkets();
+    const markets = await getMarkets();
     const summary: Array<{
       marketId: string;
       eventCount: number;
@@ -256,7 +256,7 @@ function handleGet(pathSegments: string[], searchParams: URLSearchParams): Respo
     }> = [];
 
     for (const marketId of markets) {
-      let timeline = getEvents(marketId);
+      let timeline = await getEvents(marketId);
       if (fromTs !== undefined) {
         timeline = timeline.filter((e) => e.timestamp >= fromTs);
       }
@@ -336,7 +336,7 @@ const server = Bun.serve({
     }
 
     try {
-      return handleGet(segments, url.searchParams);
+      return await handleGet(segments, url.searchParams);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return errorResponse(message, 500);

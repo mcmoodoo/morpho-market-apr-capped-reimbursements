@@ -61,7 +61,7 @@ function formatUsdc(amount: bigint): string {
 async function main() {
   const { marketId, fromBlock, toBlock, outputPath, json } = parseArgs();
 
-  const timeline = getEvents(marketId, fromBlock, toBlock);
+  const timeline = await getEvents(marketId, fromBlock, toBlock);
   if (timeline.length === 0) {
     console.error("No events found for market", marketId);
     if (fromBlock !== undefined || toBlock !== undefined) {

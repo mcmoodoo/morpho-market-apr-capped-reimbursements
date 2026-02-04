@@ -1,6 +1,6 @@
 # rate-rebate
 
-Sync Morpho Blue events (Borrow, Repay, Liquidate, AccrueInterest) for a fixed block range into SQLite.
+Sync Morpho Blue events (Borrow, Repay, Liquidate, AccrueInterest) for a fixed block range into PostgreSQL.
 
 ## Setup
 
@@ -11,6 +11,9 @@ bun install
 ## Environment
 
 - **INFURA_POLYGON_MAINNET_RPC** – Polygon mainnet RPC URL.
+- **POSTGRES_URL** or **DATABASE_URL** – PostgreSQL connection string (default: `postgresql://postgres:changeme@localhost:5432/postgres`).
+
+Ensure PostgreSQL is running before `bun run sync` (e.g. `docker start gondor-analytics` or your own Postgres). If you see "Connection closed", the server is likely not reachable—check the URL and that the container/process is up.
 
 ## Run
 
@@ -18,7 +21,7 @@ bun install
 bun run sync
 ```
 
-Clears the DB, then fetches blocks **427663781 → 427682051** and saves events to `./data/events.db`.
+Fetches blocks from a start block to current and saves events to PostgreSQL. Requires a running PostgreSQL instance (see Environment).
 
 ## Shortcomings
 

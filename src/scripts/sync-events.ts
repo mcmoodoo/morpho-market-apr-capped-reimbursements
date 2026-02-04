@@ -13,7 +13,7 @@
 import { createPublicClient, http } from "viem";
 import { polygon } from "viem/chains";
 import { fetchAllEvents } from "../lib/refund/events.ts";
-import { getMaxBlockInEvents, insertBlockTimestamps, insertEvents } from "../lib/refund/db.ts";
+import { checkPostgresConnection, getMaxBlockInEvents, insertBlockTimestamps, insertEvents } from "../lib/refund/db.ts";
 import type { TimelineEvent } from "../lib/refund/types.ts";
 
 const CHUNK_BLOCKS = 10_000n;
@@ -78,12 +78,19 @@ async function main() {
     process.exit(1);
   }
 
+  try {
+    await checkPostgresConnection();
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+
   const client = createPublicClient({
     chain: polygon,
     transport: http(rpc),
   });
 
-  const maxBlock = getMaxBlockInEvents();
+  const maxBlock = await getMaxBlockInEvents();
   const dbHasData = maxBlock !== null;
 
   if (startBlockArg !== null) {
@@ -146,8 +153,8 @@ async function main() {
         events.repay,
         events.liquidate
       );
-      insertEvents(timeline);
-      insertBlockTimestamps(blockTimestamps);
+      await insertEvents(timeline);
+      await insertBlockTimestamps(blockTimestamps);
 
       totalEvents += timeline.length;
       chunkIndex++;

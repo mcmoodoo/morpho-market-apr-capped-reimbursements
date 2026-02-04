@@ -1,62 +1,75 @@
 /**
- * SQLite DB for Morpho events (Borrow, Repay, Liquidate, AccrueInterest).
+ * PostgreSQL DB for Morpho events (Borrow, Repay, Liquidate, AccrueInterest).
  */
 
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { Database } from "bun:sqlite";
+import { SQL } from "bun";
 import type { TimelineEvent } from "./types.ts";
 
-const DB_PATH = process.env.EVENTS_DB_PATH ?? "./data/events.db";
+const POSTGRES_URL = process.env.POSTGRES_URL ?? process.env.DATABASE_URL ?? "postgresql://postgres:changethispassword@localhost:5432/postgres";
 
-let db: Database | null = null;
+let sql: SQL | null = null;
+let schemaInitialized = false;
 
-function getDb(): Database {
-  if (!db) {
-    mkdirSync(dirname(DB_PATH), { recursive: true });
-    db = new Database(DB_PATH, { create: true });
-    db.run(`
-      CREATE TABLE IF NOT EXISTS events (
-        market_id TEXT NOT NULL,
-        block_number INTEGER NOT NULL,
-        tx_index INTEGER NOT NULL,
-        log_index INTEGER NOT NULL,
-        transaction_hash TEXT,
-        event_type TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        borrower TEXT,
-        assets TEXT,
-        repaid_assets TEXT,
-        prev_borrow_rate TEXT,
-        PRIMARY KEY (market_id, block_number, tx_index, log_index)
-      )
-    `);
-    db.run(
-      `CREATE INDEX IF NOT EXISTS idx_events_market_block ON events (market_id, block_number)`
-    );
-    db.run(
-      `CREATE INDEX IF NOT EXISTS idx_events_type_borrower ON events (event_type, borrower)`
-    );
-    db.run(
-      `CREATE INDEX IF NOT EXISTS idx_events_type_timestamp ON events (event_type, timestamp)`
-    );
-    db.run(`
-      CREATE TABLE IF NOT EXISTS block_timestamps (
-        block_number INTEGER PRIMARY KEY,
-        timestamp INTEGER NOT NULL
-      )
-    `);
+/**
+ * Verify PostgreSQL is reachable. Call early in scripts to fail fast with a clear message.
+ * Uses the same connection as the rest of the app (getDb).
+ */
+export async function checkPostgresConnection(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db`SELECT 1 as ok`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const hint =
+      "Is PostgreSQL running? (e.g. docker start gondor-analytics). " +
+      "Check POSTGRES_URL or DATABASE_URL.";
+    throw new Error(`PostgreSQL connection failed: ${msg}. ${hint}`, { cause: err });
   }
-  return db;
+}
+
+async function initSchema(db: SQL): Promise<void> {
+  // Create schema
+  await db`CREATE TABLE IF NOT EXISTS events (
+    market_id TEXT NOT NULL,
+    block_number BIGINT NOT NULL,
+    tx_index INTEGER NOT NULL,
+    log_index INTEGER NOT NULL,
+    transaction_hash TEXT,
+    event_type TEXT NOT NULL,
+    timestamp BIGINT NOT NULL,
+    borrower TEXT,
+    assets BIGINT,
+    repaid_assets BIGINT,
+    prev_borrow_rate BIGINT,
+    PRIMARY KEY (market_id, block_number, tx_index, log_index)
+  )`;
+  await db`CREATE INDEX IF NOT EXISTS idx_events_market_block ON events (market_id, block_number)`;
+  await db`CREATE INDEX IF NOT EXISTS idx_events_type_borrower ON events (event_type, borrower)`;
+  await db`CREATE INDEX IF NOT EXISTS idx_events_type_timestamp ON events (event_type, timestamp)`;
+  await db`CREATE TABLE IF NOT EXISTS block_timestamps (
+    block_number BIGINT PRIMARY KEY,
+    timestamp BIGINT NOT NULL
+  )`;
+}
+
+async function getDb(): Promise<SQL> {
+  if (!sql) {
+    sql = new SQL(POSTGRES_URL);
+  }
+  if (!schemaInitialized) {
+    await initSchema(sql);
+    schemaInitialized = true;
+  }
+  return sql;
 }
 
 /** Overpayment amounts stored in micro-USDC (1e6 = 1 USDC). */
 export const OVERPAYMENT_DECIMALS = 6;
 
 /** Get all distinct market IDs from events table, ordered alphabetically. */
-export function getMarkets(): string[] {
-  const d = getDb();
-  const rows = d.query(`SELECT DISTINCT market_id FROM events ORDER BY market_id`).all() as Array<{ market_id: string }>;
+export async function getMarkets(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db`SELECT DISTINCT market_id FROM events ORDER BY market_id` as Array<{ market_id: string }>;
   return rows.map((r) => r.market_id);
 }
 
@@ -70,73 +83,56 @@ export interface MarketIndexerStatus {
 }
 
 /** Get basic indexer coverage stats per market from events table. */
-export function getIndexerStatus(): MarketIndexerStatus[] {
-  const d = getDb();
-  const rows = d
-    .query(
-      `SELECT market_id,
-              MIN(block_number)    AS min_block,
-              MAX(block_number)    AS max_block,
-              MIN(timestamp)       AS min_ts,
-              MAX(timestamp)       AS max_ts,
-              COUNT(*)             AS event_count
-       FROM events
-       GROUP BY market_id
-       ORDER BY market_id`
-    )
-    .all() as Array<{
-      market_id: string;
-      min_block: number | null;
-      max_block: number | null;
-      min_ts: number | null;
-      max_ts: number | null;
-      event_count: number;
-    }>;
+export async function getIndexerStatus(): Promise<MarketIndexerStatus[]> {
+  const db = await getDb();
+  const rows = await db`
+    SELECT market_id,
+           MIN(block_number)    AS min_block,
+           MAX(block_number)    AS max_block,
+           MIN(timestamp)       AS min_ts,
+           MAX(timestamp)       AS max_ts,
+           COUNT(*)             AS event_count
+    FROM events
+    GROUP BY market_id
+    ORDER BY market_id
+  ` as Array<{
+    market_id: string;
+    min_block: bigint | number | null;
+    max_block: bigint | number | null;
+    min_ts: bigint | number | null;
+    max_ts: bigint | number | null;
+    event_count: bigint | number;
+  }>;
   return rows.map((r) => ({
     marketId: r.market_id,
-    minBlock: r.min_block ?? null,
-    maxBlock: r.max_block ?? null,
-    minTimestamp: r.min_ts ?? null,
-    maxTimestamp: r.max_ts ?? null,
-    eventCount: r.event_count ?? 0,
+    minBlock: r.min_block != null ? Number(r.min_block) : null,
+    maxBlock: r.max_block != null ? Number(r.max_block) : null,
+    minTimestamp: r.min_ts != null ? Number(r.min_ts) : null,
+    maxTimestamp: r.max_ts != null ? Number(r.max_ts) : null,
+    eventCount: Number(r.event_count ?? 0),
   }));
 }
 
 /** Max block_number in events table (any market), or null if empty. */
-export function getMaxBlockInEvents(): bigint | null {
-  const d = getDb();
-  const row = d.query(`SELECT MAX(block_number) AS max_block FROM events`).get() as
-    | { max_block: number | null }
-    | undefined;
+export async function getMaxBlockInEvents(): Promise<bigint | null> {
+  const db = await getDb();
+  const [row] = await db`SELECT MAX(block_number) AS max_block FROM events` as Array<{ max_block: bigint | number | null }>;
   if (row?.max_block == null) return null;
   return BigInt(row.max_block);
 }
 
 /** Clear all events and block_timestamps. Call before each sync. */
-export function clearDb(): void {
-  const d = getDb();
-  d.run("DELETE FROM events");
-  d.run("DELETE FROM block_timestamps");
+export async function clearDb(): Promise<void> {
+  const db = await getDb();
+  await db.unsafe("DELETE FROM events");
+  await db.unsafe("DELETE FROM block_timestamps");
 }
 
-export function insertEvents(events: TimelineEvent[]): void {
-  const d = getDb();
-  const stmt = d.prepare(
-    `INSERT OR REPLACE INTO events (
-       market_id,
-       block_number,
-       tx_index,
-       log_index,
-       transaction_hash,
-       event_type,
-       timestamp,
-       borrower,
-       assets,
-       repaid_assets,
-       prev_borrow_rate
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  d.transaction(() => {
+export async function insertEvents(events: TimelineEvent[]): Promise<void> {
+  const db = await getDb();
+  if (events.length === 0) return;
+
+  await db.begin(async (tx) => {
     for (const event of events) {
       let borrower: string | null = null;
       let assets: bigint | null = null;
@@ -161,72 +157,117 @@ export function insertEvents(events: TimelineEvent[]): void {
           break;
       }
 
-      stmt.run(
-        event.marketId.toLowerCase(),
-        Number(event.blockNumber),
-        event.transactionIndex,
-        event.logIndex,
-        event.transactionHash,
-        event.type,
-        event.timestamp,
-        borrower,
-        assets == null ? null : assets.toString(),
-        repaidAssets == null ? null : repaidAssets.toString(),
-        prevBorrowRate == null ? null : prevBorrowRate.toString()
-      );
+      await tx`
+        INSERT INTO events (
+          market_id,
+          block_number,
+          tx_index,
+          log_index,
+          transaction_hash,
+          event_type,
+          timestamp,
+          borrower,
+          assets,
+          repaid_assets,
+          prev_borrow_rate
+        ) VALUES (
+          ${event.marketId.toLowerCase()},
+          ${Number(event.blockNumber)},
+          ${event.transactionIndex},
+          ${event.logIndex},
+          ${event.transactionHash},
+          ${event.type},
+          ${event.timestamp},
+          ${borrower},
+          ${assets != null ? Number(assets) : null},
+          ${repaidAssets != null ? Number(repaidAssets) : null},
+          ${prevBorrowRate != null ? Number(prevBorrowRate) : null}
+        )
+        ON CONFLICT (market_id, block_number, tx_index, log_index) 
+        DO UPDATE SET
+          transaction_hash = EXCLUDED.transaction_hash,
+          event_type = EXCLUDED.event_type,
+          timestamp = EXCLUDED.timestamp,
+          borrower = EXCLUDED.borrower,
+          assets = EXCLUDED.assets,
+          repaid_assets = EXCLUDED.repaid_assets,
+          prev_borrow_rate = EXCLUDED.prev_borrow_rate
+      `;
     }
-  })();
+  });
 }
 
-export function insertBlockTimestamps(
+export async function insertBlockTimestamps(
   entries: Iterable<[bigint, number]>
-): void {
-  const d = getDb();
-  const stmt = d.prepare(
-    `INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)`
-  );
-  d.transaction(() => {
+): Promise<void> {
+  const db = await getDb();
+  await db.begin(async (tx) => {
     for (const [blockNumber, timestamp] of entries) {
-      stmt.run(Number(blockNumber), timestamp);
+      await tx`
+        INSERT INTO block_timestamps (block_number, timestamp) 
+        VALUES (${Number(blockNumber)}, ${timestamp})
+        ON CONFLICT (block_number) DO UPDATE SET timestamp = EXCLUDED.timestamp
+      `;
     }
-  })();
+  });
 }
 
 /**
  * Read events for a market in timeline order (block_number, tx_index, log_index).
  * Optional block range filter.
  */
-export function getEvents(
+export async function getEvents(
   marketId: string,
   fromBlock?: bigint,
   toBlock?: bigint
-): TimelineEvent[] {
-  const d = getDb();
-  let sql = `SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate FROM events WHERE market_id = ?`;
-  const args: (string | number)[] = [marketId.toLowerCase()];
-  if (fromBlock !== undefined) {
-    sql += ` AND block_number >= ?`;
-    args.push(Number(fromBlock));
+): Promise<TimelineEvent[]> {
+  const db = await getDb();
+  let query;
+  if (fromBlock !== undefined && toBlock !== undefined) {
+    query = db`
+      SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
+      FROM events 
+      WHERE market_id = ${marketId.toLowerCase()} 
+        AND block_number >= ${Number(fromBlock)} 
+        AND block_number <= ${Number(toBlock)}
+      ORDER BY block_number, tx_index, log_index
+    `;
+  } else if (fromBlock !== undefined) {
+    query = db`
+      SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
+      FROM events 
+      WHERE market_id = ${marketId.toLowerCase()} 
+        AND block_number >= ${Number(fromBlock)}
+      ORDER BY block_number, tx_index, log_index
+    `;
+  } else if (toBlock !== undefined) {
+    query = db`
+      SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
+      FROM events 
+      WHERE market_id = ${marketId.toLowerCase()} 
+        AND block_number <= ${Number(toBlock)}
+      ORDER BY block_number, tx_index, log_index
+    `;
+  } else {
+    query = db`
+      SELECT block_number, tx_index, log_index, transaction_hash, event_type, timestamp, borrower, assets, repaid_assets, prev_borrow_rate 
+      FROM events 
+      WHERE market_id = ${marketId.toLowerCase()}
+      ORDER BY block_number, tx_index, log_index
+    `;
   }
-  if (toBlock !== undefined) {
-    sql += ` AND block_number <= ?`;
-    args.push(Number(toBlock));
-  }
-  sql += ` ORDER BY block_number, tx_index, log_index`;
 
-  const rows = d
-    .query(sql)
-    .all(...args) as Array<{
-    block_number: number;
+  const rows = await query as Array<{
+    block_number: bigint | number;
     tx_index: number;
     log_index: number;
     transaction_hash: string | null;
     event_type: string;
-    timestamp: number;
+    timestamp: bigint | number;
     borrower: string | null;
-    assets: string | null;
-    repaid_assets: string | null;
-    prev_borrow_rate: string | null;
+    assets: bigint | number | null;
+    repaid_assets: bigint | number | null;
+    prev_borrow_rate: bigint | number | null;
   }>;
 
   const out: TimelineEvent[] = [];
@@ -237,7 +278,7 @@ export function getEvents(
       transactionIndex: row.tx_index,
       logIndex: row.log_index,
       transactionHash: row.transaction_hash ?? "",
-      timestamp: row.timestamp,
+      timestamp: Number(row.timestamp),
     } as const;
 
     switch (row.event_type) {
@@ -246,7 +287,7 @@ export function getEvents(
           type: "borrow",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
+          assets: row.assets != null ? BigInt(row.assets) : 0n,
         });
         break;
       case "repay":
@@ -254,7 +295,7 @@ export function getEvents(
           type: "repay",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
+          assets: row.assets != null ? BigInt(row.assets) : 0n,
         });
         break;
       case "liquidate":
@@ -262,7 +303,7 @@ export function getEvents(
           type: "liquidate",
           ...common,
           borrower: row.borrower ?? "",
-          repaidAssets: row.repaid_assets != null && row.repaid_assets !== "" ? BigInt(row.repaid_assets) : 0n,
+          repaidAssets: row.repaid_assets != null ? BigInt(row.repaid_assets) : 0n,
         });
         break;
       case "accrue":
@@ -270,7 +311,7 @@ export function getEvents(
         out.push({
           type: "accrue",
           ...common,
-          prevBorrowRate: row.prev_borrow_rate != null && row.prev_borrow_rate !== "" ? BigInt(row.prev_borrow_rate) : 0n,
+          prevBorrowRate: row.prev_borrow_rate != null ? BigInt(row.prev_borrow_rate) : 0n,
         });
         break;
     }
