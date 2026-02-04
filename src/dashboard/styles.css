@@ -753,10 +753,6 @@ video {
   margin-left: auto;
 }
 
-.mt-1 {
-  margin-top: 0.25rem;
-}
-
 .mt-2 {
   margin-top: 0.5rem;
 }
@@ -831,10 +827,6 @@ video {
 
 .w-full {
   width: 100%;
-}
-
-.min-w-\[220px\] {
-  min-width: 220px;
 }
 
 .min-w-\[72px\] {
