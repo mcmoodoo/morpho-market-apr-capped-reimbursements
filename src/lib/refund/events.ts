@@ -1,6 +1,6 @@
 import type { PublicClient } from "viem";
 import { parseAbiItem } from "viem";
-import { MORPHO_BLUE } from "./config.ts";
+import { MORPHO_BLUE, WAD_TO_USDC } from "./config.ts";
 import type {
   AccrueInterestEvent,
   BorrowEvent,
@@ -42,7 +42,7 @@ export interface FetchAllEventsResult {
 const MAX_BLOCKS_PER_GETLOGS = 50_000n;
 
 // Delay between eth_getLogs calls to avoid Infura 429 Too Many Requests (rate limit).
-const RPC_DELAY_MS = 1000;
+const RPC_DELAY_MS = 3000; // Increased to reduce rate limiting
 
 // Max batch size for eth_getBlockByNumber batch (Infura may limit request size).
 const BLOCK_TIMESTAMPS_BATCH_SIZE = 500;
@@ -231,41 +231,64 @@ export async function fetchAllEvents(
     prevBorrowRate: log.args.prevBorrowRate!,
   }));
 
-  const borrow: BorrowEvent[] = borrowRaw.map((log) => ({
-    type: "borrow" as const,
-    marketId: marketIdStr(log.args.id),
-    blockNumber: log.blockNumber,
-    transactionIndex: log.transactionIndex,
-    logIndex: log.logIndex,
-    transactionHash: log.transactionHash!,
-    timestamp: ts(log.blockNumber),
-    borrower: log.args.onBehalf!,
-    assets: log.args.assets!,
-  }));
+  const borrow: BorrowEvent[] = borrowRaw.map((log) => {
+    const assets = log.args.assets;
+    if (!assets) throw new Error("Missing assets in borrow event");
+    const assetsBigInt = typeof assets === "bigint" ? assets : BigInt(assets);
+    return {
+      type: "borrow" as const,
+      marketId: marketIdStr(log.args.id),
+      blockNumber: log.blockNumber,
+      transactionIndex: log.transactionIndex,
+      logIndex: log.logIndex,
+      transactionHash: log.transactionHash!,
+      timestamp: ts(log.blockNumber),
+      borrower: log.args.onBehalf!,
+      // Convert from WAD (18 decimals) to USDC (6 decimals)
+      assets: assetsBigInt / WAD_TO_USDC,
+    };
+  });
 
-  const repay: RepayEvent[] = repayRaw.map((log) => ({
-    type: "repay" as const,
-    marketId: marketIdStr(log.args.id),
-    blockNumber: log.blockNumber,
-    transactionIndex: log.transactionIndex,
-    logIndex: log.logIndex,
-    transactionHash: log.transactionHash!,
-    timestamp: ts(log.blockNumber),
-    borrower: log.args.onBehalf!,
-    assets: log.args.assets!,
-  }));
+  const repay: RepayEvent[] = repayRaw.map((log) => {
+    const assets = log.args.assets;
+    if (!assets) throw new Error("Missing assets in repay event");
+    const assetsBigInt = typeof assets === "bigint" ? assets : BigInt(assets);
+    return {
+      type: "repay" as const,
+      marketId: marketIdStr(log.args.id),
+      blockNumber: log.blockNumber,
+      transactionIndex: log.transactionIndex,
+      logIndex: log.logIndex,
+      transactionHash: log.transactionHash!,
+      timestamp: ts(log.blockNumber),
+      borrower: log.args.onBehalf!,
+      // Convert from WAD (18 decimals) to USDC (6 decimals)
+      assets: assetsBigInt / WAD_TO_USDC,
+    };
+  });
 
-  const liquidate: LiquidateEvent[] = liquidateRaw.map((log) => ({
-    type: "liquidate" as const,
-    marketId: marketIdStr(log.args.id),
-    blockNumber: log.blockNumber,
-    transactionIndex: log.transactionIndex,
-    logIndex: log.logIndex,
-    transactionHash: log.transactionHash!,
-    timestamp: ts(log.blockNumber),
-    borrower: log.args.borrower!,
-    repaidAssets: log.args.repaidAssets!,
-  }));
+  const liquidate: LiquidateEvent[] = liquidateRaw
+    .map((log) => {
+      const repaidAssets = log.args.repaidAssets;
+      if (repaidAssets == null) {
+        console.warn(`Skipping liquidate event at block ${log.blockNumber}: missing repaidAssets`);
+        return null;
+      }
+      const repaidAssetsBigInt = typeof repaidAssets === "bigint" ? repaidAssets : BigInt(repaidAssets);
+      return {
+        type: "liquidate" as const,
+        marketId: marketIdStr(log.args.id),
+        blockNumber: log.blockNumber,
+        transactionIndex: log.transactionIndex,
+        logIndex: log.logIndex,
+        transactionHash: log.transactionHash!,
+        timestamp: ts(log.blockNumber),
+        borrower: log.args.borrower!,
+        // Convert from WAD (18 decimals) to USDC (6 decimals)
+        repaidAssets: repaidAssetsBigInt / WAD_TO_USDC,
+      };
+    })
+    .filter((e): e is LiquidateEvent => e !== null);
 
   return { events: { accrue, borrow, repay, liquidate }, blockTimestamps };
 }

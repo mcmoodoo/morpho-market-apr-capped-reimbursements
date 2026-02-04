@@ -17,8 +17,8 @@ import { checkPostgresConnection, getMaxBlockInEvents, insertBlockTimestamps, in
 import type { TimelineEvent } from "../lib/refund/types.ts";
 
 const CHUNK_BLOCKS = 10_000n;
-const RPC_DELAY_MS = 400;
-const CHUNK_DELAY_MS = 3000;
+const RPC_DELAY_MS = 4000; // Delay between RPC calls (getBlock, etc.)
+const CHUNK_DELAY_MS = 10000; // Delay between chunks (after processing events)
 
 function parseArgs(): { startBlock: bigint | null } {
   const args = process.argv.slice(2);
@@ -135,6 +135,7 @@ async function main() {
         client.getBlock({ blockNumber: cursor }),
         client.getBlock({ blockNumber: chunkEnd }),
       ]);
+      await sleep(RPC_DELAY_MS); // Delay after getBlock calls
       const startTimestamp = Number(startBlockData.timestamp);
       const endTimestamp = Number(endBlockData.timestamp);
 

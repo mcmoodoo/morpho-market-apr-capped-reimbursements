@@ -10,3 +10,6 @@ export const APR_CAP_WAD = (APR_CAP_PERCENT * WAD) / 100n;
 export const APR_CAP_PER_SECOND = APR_CAP_WAD / SECONDS_PER_YEAR;
 
 export const USDC_DECIMALS = 6;
+// Morpho Blue emits assets in WAD (18 decimals), but USDC uses 6 decimals
+// Convert from WAD to USDC: divide by 10^(18-6) = 10^12
+export const WAD_TO_USDC = 10n ** 12n;
