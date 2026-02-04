@@ -1,5 +1,6 @@
 /**
  * Dashboard API: read-only JSON API for reports and overpayments.
+ * Serves dashboard at GET / (and /dashboard/* assets).
  *
  * Endpoints:
  *   GET /health
@@ -11,6 +12,7 @@
  * Amounts are returned in micro-USDC (string) — divide by 1e6 for USDC.
  */
 
+import { join } from "node:path";
 import {
   getReportById,
   getLatestReportForMarket,
@@ -22,6 +24,7 @@ import {
 } from "../lib/refund/db.ts";
 
 const PORT = Number(process.env.API_PORT ?? 3000);
+const DASHBOARD_DIR = join(import.meta.dir, "../dashboard");
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -140,7 +143,29 @@ const server = Bun.serve({
       return errorResponse("Method not allowed", 405);
     }
     const url = new URL(req.url);
-    const segments = url.pathname.replace(/^\/+|\/+$/g, "").split("/");
+    const pathname = url.pathname.replace(/\/$/, "") || "/";
+    const segments = pathname.replace(/^\/+|\/+$/g, "").split("/");
+
+    // Dashboard: GET / or GET /dashboard -> index.html
+    const isRoot = segments.length === 0 || (segments.length === 1 && (segments[0] === "" || segments[0] === "dashboard"));
+    if (isRoot) {
+      const file = Bun.file(join(DASHBOARD_DIR, "index.html"));
+      return new Response(file, {
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+    // Dashboard assets: GET /dashboard/dist/main.js, GET /dashboard/styles.css
+    if (segments[0] === "dashboard") {
+      if (segments[1] === "dist" && segments[2] === "main.js") {
+        const file = Bun.file(join(DASHBOARD_DIR, "dist", "main.js"));
+        return new Response(file, { headers: { "Content-Type": "application/javascript" } });
+      }
+      if (segments[1] === "styles.css") {
+        const file = Bun.file(join(DASHBOARD_DIR, "styles.css"));
+        return new Response(file, { headers: { "Content-Type": "text/css" } });
+      }
+    }
+
     try {
       return handleGet(segments, url.searchParams);
     } catch (err) {

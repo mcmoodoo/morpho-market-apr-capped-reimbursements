@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Refund dashboard</title>
+  <link rel="stylesheet" href="/dashboard/styles.css" />
+</head>
+<body>
+  <div id="root">Loading…</div>
+  <script type="module" src="/dashboard/dist/main.js"></script>
+  <script>
+    setTimeout(function () {
+      var root = document.getElementById("root");
+      if (root && root.textContent.trim() === "Loading…") {
+        root.innerHTML = "<div style='padding:1.5rem;font-family:system-ui;max-width:600px;margin:0 auto;'>" +
+          "<h2 style='color:#c00;'>App didn't load</h2>" +
+          "<p>Open the browser console (F12) for errors. Check that the API is running: <code>bun run api</code></p>" +
+          "<p>If you see a red error about fetch or CORS, you may be opening the page from a different origin than the API.</p>" +
+          "</div>";
+      }
+    }, 3000);
+  </script>
+</body>
+</html>
