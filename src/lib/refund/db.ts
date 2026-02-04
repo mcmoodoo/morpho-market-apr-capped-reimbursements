@@ -28,7 +28,8 @@ export async function checkPostgresConnection(): Promise<void> {
 }
 
 async function initSchema(db: SQL): Promise<void> {
-  // Create schema
+  // Create schema. assets/repaid_assets/prev_borrow_rate are TEXT because chain uses uint256
+  // and values can exceed PostgreSQL BIGINT (64-bit).
   await db`CREATE TABLE IF NOT EXISTS events (
     market_id TEXT NOT NULL,
     block_number BIGINT NOT NULL,
@@ -38,11 +39,19 @@ async function initSchema(db: SQL): Promise<void> {
     event_type TEXT NOT NULL,
     timestamp BIGINT NOT NULL,
     borrower TEXT,
-    assets BIGINT,
-    repaid_assets BIGINT,
-    prev_borrow_rate BIGINT,
+    assets TEXT,
+    repaid_assets TEXT,
+    prev_borrow_rate TEXT,
     PRIMARY KEY (market_id, block_number, tx_index, log_index)
   )`;
+  // Migrate existing BIGINT columns to TEXT if present (safe no-op when already TEXT).
+  try {
+    await db.unsafe("ALTER TABLE events ALTER COLUMN assets TYPE TEXT USING assets::text");
+    await db.unsafe("ALTER TABLE events ALTER COLUMN repaid_assets TYPE TEXT USING repaid_assets::text");
+    await db.unsafe("ALTER TABLE events ALTER COLUMN prev_borrow_rate TYPE TEXT USING prev_borrow_rate::text");
+  } catch {
+    // Table may not exist yet or columns already TEXT
+  }
   await db`CREATE INDEX IF NOT EXISTS idx_events_market_block ON events (market_id, block_number)`;
   await db`CREATE INDEX IF NOT EXISTS idx_events_type_borrower ON events (event_type, borrower)`;
   await db`CREATE INDEX IF NOT EXISTS idx_events_type_timestamp ON events (event_type, timestamp)`;
@@ -179,9 +188,9 @@ export async function insertEvents(events: TimelineEvent[]): Promise<void> {
           ${event.type},
           ${event.timestamp},
           ${borrower},
-          ${assets != null ? Number(assets) : null},
-          ${repaidAssets != null ? Number(repaidAssets) : null},
-          ${prevBorrowRate != null ? Number(prevBorrowRate) : null}
+          ${assets != null ? assets.toString() : null},
+          ${repaidAssets != null ? repaidAssets.toString() : null},
+          ${prevBorrowRate != null ? prevBorrowRate.toString() : null}
         )
         ON CONFLICT (market_id, block_number, tx_index, log_index) 
         DO UPDATE SET
@@ -265,9 +274,9 @@ export async function getEvents(
     event_type: string;
     timestamp: bigint | number;
     borrower: string | null;
-    assets: bigint | number | null;
-    repaid_assets: bigint | number | null;
-    prev_borrow_rate: bigint | number | null;
+    assets: string | null;
+    repaid_assets: string | null;
+    prev_borrow_rate: string | null;
   }>;
 
   const out: TimelineEvent[] = [];
@@ -287,7 +296,7 @@ export async function getEvents(
           type: "borrow",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null ? BigInt(row.assets) : 0n,
+          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
         });
         break;
       case "repay":
@@ -295,7 +304,7 @@ export async function getEvents(
           type: "repay",
           ...common,
           borrower: row.borrower ?? "",
-          assets: row.assets != null ? BigInt(row.assets) : 0n,
+          assets: row.assets != null && row.assets !== "" ? BigInt(row.assets) : 0n,
         });
         break;
       case "liquidate":
@@ -303,7 +312,7 @@ export async function getEvents(
           type: "liquidate",
           ...common,
           borrower: row.borrower ?? "",
-          repaidAssets: row.repaid_assets != null ? BigInt(row.repaid_assets) : 0n,
+          repaidAssets: row.repaid_assets != null && row.repaid_assets !== "" ? BigInt(row.repaid_assets) : 0n,
         });
         break;
       case "accrue":
@@ -311,7 +320,7 @@ export async function getEvents(
         out.push({
           type: "accrue",
           ...common,
-          prevBorrowRate: row.prev_borrow_rate != null ? BigInt(row.prev_borrow_rate) : 0n,
+          prevBorrowRate: row.prev_borrow_rate != null && row.prev_borrow_rate !== "" ? BigInt(row.prev_borrow_rate) : 0n,
         });
         break;
     }

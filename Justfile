@@ -14,3 +14,7 @@ postgres-docker-start:
 postgres-docker-stop:
     docker stop pgdev
     docker rm pgdev
+
+# Connect to Postgres (uses POSTGRES_URL or DATABASE_URL; default matches postgres-docker-start)
+psql:
+    psql "${POSTGRES_URL:-${DATABASE_URL:-postgresql://postgres:changethispassword@localhost:5432/postgres}}"
